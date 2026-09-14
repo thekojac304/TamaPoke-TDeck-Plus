@@ -28,15 +28,18 @@ The T-Deck state flow is:
 GPS: SEARCHING (12 s preference)
   -> TIME: GPS (first valid source wins)
   -> WIFI: CONNECTING -> WIFI: SYNCING -> TIME: WIFI
-  -> TIME: UNSYNCED -> one Set Time / Later prompt
-Manual adjustment -> TIME: MANUAL
+  -> TIME: LOCAL -> one Set Time / Later prompt
+Manual Set Clock Only / confirmed Set & Catch Up -> TIME: MANUAL
 ```
 
 GPS parsing continues during Wi-Fi fallback, but a second source cannot deliver
-another `syncClock()` or another powered-off catch-up. Manual Set Time uses
-`setClock()` and never performs catch-up. Invalid, backward or over-ten-year UTC
-deltas are rejected. Wi-Fi/NTP work is asynchronous and the radio is disabled
-again after scan, setup, connect, success or failure.
+another `syncClock()` or another powered-off catch-up. The default manual action,
+`Set Clock Only`, uses `setClock()` and never performs catch-up. `Set & Catch Up`
+requires a saved/trusted reference, a sane forward time, and an Apply confirmation;
+it then calls the same `syncClock()` path exactly once. Invalid, backward or
+over-ten-year deltas are rejected, and `syncClock()` retains its two-week gameplay
+cap. Wi-Fi/NTP work is asynchronous and the radio is disabled again after scan,
+setup, connect, success or failure.
 
 Settings now has non-overlapping `SYNC GPS`, `SYNC WIFI`, and `MANUAL` controls,
 plus a dedicated live time/source row. `WIFI TIME` provides Wi-Fi on/off, saved
@@ -53,8 +56,19 @@ credentials. Its new NVS namespace is `tp-wifi`:
 | `ssid` | string | TamaPoke-selected station SSID |
 | `pass` | string | Station password; never logged |
 
-The existing `tp-clock` keys (`wall`, `utc`, `offset`, `mapped`) and pet-save
-schema are unchanged.
+T-Deck-specific state is isolated from the existing pet-save schema:
+
+| Namespace | Key | Type | Meaning |
+|---|---|---|---|
+| `tp-clock` | `wall` | uint32 | Last wall-clock reference |
+| `tp-clock` | `utc` | uint32 | Paired authoritative UTC reference when mapped |
+| `tp-clock` | `offset` | int32 | Wall-minus-UTC offset |
+| `tp-clock` | `mapped` | bool | UTC/wall pair is valid |
+| `tp-clock` | `trusted` | bool | Manual catch-up has a valid reference |
+| `tp-display` | `timeout` | uint8 | 0..5 timeout choice; default 2 (two minutes) |
+
+The `trusted` key is backward-compatible: a valid legacy mapped pair is treated
+as trusted when the key is absent. No existing pet NVS key changed.
 
 Successful GPS sync emits (numbers vary):
 
@@ -116,15 +130,16 @@ Physical validation for this pass:
   SDMMC, ES8311 audio, PCF85063 and AXP2101 implementations. Root `audio.cpp`
   and `rtcbat.cpp` are compatibility placeholders; their public headers remain.
 - `src/board/tdeck_plus/` owns all target pins, ST7789 initialization, GT911,
-  pulse backlight, SPI SD, silent audio and system-clock fallback.
+  trackball-center power behavior, pulse backlight, battery ADC, SPI SD, I2S
+  audio, and the GPS/NTP/manual system-clock implementation.
 - `src/ui/layout*.h` defines geometry. `playable_landscape.h` renders the small
   screen; `actions_landscape.h` routes its rectangles into existing Pet methods.
   The same rectangles drive drawing and touch hit tests.
 - `sdmon.cpp` uses `Board::storage()` without changing formats, paths, shiny
   fallback, thumbnail loading, or the PUT/LS/SDINFO protocol.
-- `pet.cpp`, `pet.h`, `species.h`, `dex.h`, `i18n.cpp`, `i18n.h` and sprite assets
-  remain unchanged. NVS namespaces, keys, schema, partition addresses, and
-  deferred-save opportunities remain unchanged.
+- Species, evolution, care, progression, training, Pokédex, pet-save schema,
+  partition addresses, and sprite assets remain unchanged. Pet clock telemetry
+  exposes the last applied catch-up without persisting a new gameplay field.
 
 The compact home has a 208x174 scene, side needs bars, and four 80x40 care
 buttons. Sprites use integer scaling, including 1x; PMD action bounds are fitted
@@ -237,9 +252,17 @@ boot. Missing cards report `FAIL` followed by the existing flash-sprite fallback
 message. Missing thumbnails or packs retain their existing diagnostics.
 `DISPLAY ... FAIL` stops at a serial fatal message, avoiding a null framebuffer.
 `TOUCH ... FAIL` leaves the game rendering for diagnosis but touch is unavailable.
-`HEALTH`, `STATS`, `SDINFO`, and `LS` remain available. Power readings are unknown:
-battery is -1; extended health charging/USB fields are -1. For coordinate logs,
-rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
+`HEALTH`, `STATS`, `SDINFO`, and `LS` remain available. Battery startup and
+once-per-minute diagnostics show calibrated ADC, doubled cell voltage, smoothed
+voltage, and estimated percentage:
+
+```text
+BATTERY adc_mv=<divider millivolts> cell_mv=<doubled millivolts> smooth_mv=<EMA> estimated_pct=<0..100|-1>
+```
+
+Charging and USB state remain deliberately unknown (`-1`) because the T-Deck
+does not expose a reliable signal for them here. For coordinate logs, rebuild
+with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 ## Temporary limitations
 
@@ -255,9 +278,17 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
   the local offset; mapped boots use the paired UTC references for one absolute
   `syncClock()` call; negative and over-ten-year source jumps are not applied,
   while the existing game logic retains its two-week progression cap.
-- The CPU keeps running while dimmed. No deep sleep or physical power-key
-  semantics are emulated. Battery percentage, voltage, charging and USB detection
-  are unavailable. Brightness uses the official 16-level pulse scheme.
+- The T-Deck screen timeout choices are 30 seconds, 1, 2, 5, and 10 minutes, or
+  Never; two minutes is the default. The last 15 seconds are dimmed. Timeout or
+  a 1750 ms trackball-center hold flushes a pending save, stops rendering, and
+  turns off only the backlight. Game logic and time sync keep running. A normal
+  center press wakes at normal brightness; touch cannot wake the display.
+  Trackball movement and normal touch activity reset the idle timer. No deep
+  sleep is implemented; see `TDECK_PLUS_DEEP_SLEEP_DESIGN.md`.
+- Battery GPIO4 is sampled with the calibrated Arduino ADC API and the board's
+  100k/100k divider (2:1). Eight-sample averaging, a 7/8 EMA, two-percentage-point
+  hysteresis, and a piecewise Li-ion discharge estimate reduce flicker. Implausible
+  readings outside 3.0–4.4 V are omitted. Charging/USB state is not inferred.
 - Speaker output uses the existing synthesized 16 kHz PCM effects on I2S BCK 7,
   WS 5 and DOUT 6. Effect bursts end with zero samples and release I2S for idle
   silence; initialization failure degrades to silent operation. There is no
@@ -281,9 +312,12 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 3. On fresh NVS, try each starter on separate test runs; hatch with three taps.
    Check normal sprite animation, food options, Play, Light, Bath and petting.
    Bath must complete and clear poops; sleeping must gate other care actions.
-4. Leave idle for dimming (90 seconds and five minutes). First touch must only
-   wake; the next touch must act. Hold/drag through wake and confirm no care action
-   leaks through. Keep checking health logs for stalled loops.
+4. Cycle every screen timeout and verify persistence after reboot. At 30 seconds,
+   verify dimming during the last 15 seconds and full backlight-off at the limit.
+   Confirm the game clock/progression and background time sync continue. Touch
+   must not wake; a normal trackball-center press must wake immediately without
+   leaking an action. Hold center for at least 1750 ms while on and verify immediate
+   screen-off plus a save flush. Confirm direction movement resets the idle timer.
 5. Confirm/decline evolution and farewell; cancel/confirm release on a disposable
    test pet. Check the ceremony completes and returns to an egg. Existing debug
    commands can accelerate testing but deliberately change the test pet.
@@ -301,6 +335,10 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
    position fix. Power off for a measured interval, reboot, and verify exactly one
    catch-up. Repeat indoors with pre-existing Wi-Fi credentials for NTP, then with
    no credentials and confirm `TIME: LOCAL` plus manual Set Time remain usable.
+11. Compare GPIO4 battery diagnostics with a multimeter across charged, mid-level,
+    and low battery conditions. Confirm Home percentage is stable, Settings voltage
+    is plausible, invalid/no-battery samples show no fabricated percentage, and no
+    charging icon/state is invented.
 
 ### Secondary UI physical checklist
 
@@ -312,8 +350,13 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 4. Battle: verify all four compact bars/values and open strength training.
 5. Medals: inspect all eight earned/unearned badges in every language.
 6. Progress: inspect level bar, next-level text, evolution state, and mistakes.
-7. Settings: adjust hour/minute across 00/23 and 00/59, toggle sound, cycle all
-   seven languages, cancel once, apply once, and verify persistence after reset.
+7. Settings: adjust hour/minute across 00/23 and 00/59. Verify Set Clock Only
+   changes the display and `TIME: MANUAL` but leaves age, level/evolution timing,
+   needs, and daily state untouched. For Set & Catch Up, verify the confirmation
+   shows the saved reference, new time and interval; Cancel changes nothing, Apply
+   advances those systems once, and a second tap/re-entry cannot duplicate it.
+   Verify backward/absurd input and missing trusted reference are rejected. Also
+   toggle sound, cycle all seven languages, and verify settings persistence.
 8. Pokédex grid: inspect all ten pages, including the final partial page; select
    registered, unknown, and shiny entries and return from each detail screen.
 9. Pokédex detail: check small and largest PMD sprites, silhouette behavior, header,
@@ -327,13 +370,15 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 ## Validation and changed files
 
-- Original Waveshare default target built successfully immediately after board
-  extraction. Both final target builds use the pinned dependencies above.
-- Host suite: **122 tests, 39,480 assertions, all passed**. Coverage includes every
-  current PMD pack; generated secondary layout cells and controls; visible home
-  navigation; starter/egg taps; food choices; training/light/bath/affection
-  routing; and confirmation expiry/cancellation. Hardware acquisition and
-  framebuffer output are not simulated by these host tests.
+- Both final targets build with the pinned dependencies above. Waveshare reports
+  812,378 bytes of sketch flash use and 33,548 bytes static RAM. T-Deck Plus
+  reports 1,341,359 bytes of sketch flash use and 57,192 bytes static RAM.
+- Host suite: **132 tests, 39,607 assertions, all passed**. Targeted coverage now
+  proves Set Clock Only does not progress the pet; manual confirmed catch-up and
+  GPS/Wi-Fi authoritative delivery advance age, level/evolution readiness, needs,
+  and existing daily state through `syncClock()`; and each absolute catch-up can
+  be consumed only once. Timeout and battery estimation policies are also tested.
+  Hardware ADC, GPIO, GPS, Wi-Fi, audio, and framebuffer output are not simulated.
 - Translation format check passed. Python tools suite: **16 passed, one failed**
   on Windows: `test_los_scripts_ejecutables_declaran_shebang` assumes POSIX
   executable permissions; Windows reports `dex_data.py` as executable. The
@@ -342,34 +387,30 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 - ASan/UBSan was attempted but could not link: this Windows compiler has no
   `libasan`/`libubsan`. Linux CI retains the sanitizer run; it was not executed
   remotely during this work.
-- The actual partition binaries retain NVS at 0x9000, size 0x5000. Protected
-  game/data/asset files have no diff. No physical device tests or flashing were
-  performed.
+- The actual partition binary retains NVS at 0x9000, size 0x5000. Esptool 5.3.0
+  recognizes the final application as ESP32-S3/16 MB and validates its image
+  checksum and hash. Staged T-Deck firmware sources match the working tree.
+  No physical device tests or flashing were performed.
 
-This physical-validation pass modified `TamaPoke.ino`, `pet.cpp`, `pet.h`,
-`rtcbat.h`, both board RTC implementations, the T-Deck audio/compact UI files,
-`test/Makefile`, focused host tests, and this guide.
-
-Added files: `src/board/board.h`, `src/board/board_select.h`;
-`src/board/waveshare_amoled/{pins.h,board.cpp,audio.cpp,rtcbat.cpp}`;
-`src/board/tdeck_plus/{pins.h,board.cpp,st7789_init.h,audio.cpp,rtcbat.cpp}`;
-`src/ui/{layout.h,layout_round466.h,layout_landscape320.h,playable_landscape.h,actions_landscape.h}`;
-`test/test_layout.cpp`, `test/test_compact.cpp`, `tools/build_firmware.py`, and
-this guide. The pre-existing `TDECK_PLUS_PORTING_ANALYSIS.md` was preserved.
-This pass additionally added `src/board/tdeck_plus/time_sync_policy.h`,
-`src/ui/time_ui.h`, and `test/test_time_sync.cpp`.
+This pass modified `TamaPoke.ino`, `rtcbat.h`, `src/board/board.h`, both board
+implementations' compatibility surfaces, the T-Deck pins/clock/board policies,
+the compact layout/renderers, `test/Makefile`, and focused time/layout/Pet tests.
+It added `src/board/tdeck_plus/{display_power_policy.h,battery_policy.h}`,
+`test/{test_display_power.cpp,test_battery.cpp}`, and
+`TDECK_PLUS_DEEP_SLEEP_DESIGN.md`. `TDECK_PLUS_PORTING_ANALYSIS.md`, gameplay
+data/rules, sprite assets, and the existing pet NVS schema were preserved.
 
 Final firmware results:
 
-| Target | Compile | Application binary bytes | Static RAM reported |
+| Target | Compile | Application `.bin` bytes | Static RAM reported |
 |---|---|---:|---:|
-| Waveshare | PASS | 812,496 | 33,548 |
-| T-Deck Plus | PASS | 1,326,848 | 56,872 |
+| Waveshare | PASS | 812,528 | 33,548 |
+| T-Deck Plus | PASS | 1,341,504 | 57,192 |
 
 T-Deck application SHA-256:
-`eec09bd98b4be3b9d9a70aae4e749145cf5c65b60e143636667493f3191d2eef`.
+`ec0c055cdd58dffffd5923239f3ae3777765f15976447572db0ae1f6629594df`.
 Waveshare application SHA-256:
-`c8de262221e21f3e9a7816dd466f6fbc0e9d0650d9ee2c39dc52f3954cfde188`.
+`fdd093771ce8678a7fe6132d59c718370d555de98604fbebcfcdb30a1c323346`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.
