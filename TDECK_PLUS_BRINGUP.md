@@ -1,4 +1,4 @@
-# T-Deck Plus first playable port
+# T-Deck Plus playable port and secondary UI
 
 Branch: `codex/tdeck-plus-port`. This is a compile-tested bring-up candidate;
 boot, panel colors, touch alignment, shared-bus reliability, and physical save
@@ -29,10 +29,19 @@ buttons. Sprites use integer scaling, including 1x; PMD action bounds are fitted
 individually and feet anchored within the scene. All 302 existing PMD packs fit.
 The starter rows, egg taps/cracks, four food options, care actions, evolution,
 farewell/runaway and release confirmations are available. Bath rendering still
-completes the original delayed cleaning action. The Play button calls the
-existing `Pet::play()` care method; the ball minigame and its training rewards
-are deferred. Long press is still three seconds, and waking consumes the whole
-first gesture. Horizontal/vertical swipes dismiss overlays on the compact UI.
+completes the original delayed cleaning action. Long press is still three
+seconds, and waking consumes the whole first gesture.
+
+The header exposes Profile, Pokédex, and Settings touch targets. The original
+gesture model is also restored: swipe up for the four-page card, down for
+Settings, and horizontally for the Pokédex/page navigation. Landscape renderers
+cover Profile, battle stats, all eight medals, progress, clock, language, sound,
+nickname entry, Pokédex grid/detail, strength training/results, and the ball
+minigame/results. The grid retains 16 entries per page. The touch keyboard keeps
+all 30 original keys in a 6x5 layout. Strength training retains its 10-second
+timer and original reward call. The ball game retains the 466x466 logical circle,
+gravity, bounce, misses, scoring, timing, and reward call; drawing and touch are
+transformed into a 240x240 square beside a landscape HUD.
 
 ## Reproducible builds
 
@@ -141,12 +150,12 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 - The CPU keeps running while dimmed. No deep sleep or physical power-key
   semantics are emulated. Battery percentage, voltage, charging and USB detection
   are unavailable. Brightness uses the official 16-level pulse scheme.
-- No audio, keyboard, trackball, GPS, LoRa, BLE, networking or launcher work.
-  Profile/medals/progress, nickname keyboard, settings, Pokédex and minigame UI
-  are unavailable. Existing serial nickname/time controls remain.
-- Long labels/status lines are clipped to reserved text widths. Full secondary
-  screen and translation polish is deferred. Ceremony/evolution effects are
-  simplified on the compact scene; the engine's timing and outcomes are retained.
+- No audio backend, physical keyboard, trackball, GPS, LoRa, BLE, networking or
+  launcher work. The on-screen sound preference remains usable, but the T-Deck
+  backend is intentionally silent in this pass.
+- Long labels are clipped to their reserved rectangles when a translation cannot
+  fit at the smallest supported font. Ceremony/evolution effects remain simplified
+  on the compact scene; the engine's timing and outcomes are retained.
 - SD is deliberately conservative at 800 kHz, so large sprite loads and USB
   uploads may pause animation. Malformed oversized external sprites are not
   resampled; use the existing supplied packs for bring-up.
@@ -177,15 +186,38 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 8. Repeat cold boot on battery, with/without USB monitor and with/without SD.
    Finally smoke-test the original Waveshare binary on its own board.
 
+### Secondary UI physical checklist
+
+1. Home: tap `i`, `#`, and `...`; also verify up/down/horizontal swipes reach the
+   same Profile, Settings, and Pokédex destinations and every path can return.
+2. Profile: verify portrait and identity/info columns do not overlap; tap the name.
+3. Nickname: enter letters, dot and hyphen, delete, save, cancel, and confirm the
+   saved name survives reset.
+4. Battle: verify all four compact bars/values and open strength training.
+5. Medals: inspect all eight earned/unearned badges in every language.
+6. Progress: inspect level bar, next-level text, evolution state, and mistakes.
+7. Settings: adjust hour/minute across 00/23 and 00/59, toggle sound, cycle all
+   seven languages, cancel once, apply once, and verify persistence after reset.
+8. Pokédex grid: inspect all ten pages, including the final partial page; select
+   registered, unknown, and shiny entries and return from each detail screen.
+9. Pokédex detail: check small and largest PMD sprites, silhouette behavior, header,
+   text column, animation, and Back target for clipping or stale pixels.
+10. Strength training: hit inside/outside the outlined target, exit early, finish a
+    full ten-second run, inspect gain/new-record result, and verify the exact reward.
+11. Ball game: tap at the four edges and center, verify circular rebounds, three
+    misses, score/record/lives HUD, early exit, result screen, and speed reward.
+12. Confirmations: accept/cancel Release, Evolution, and Farewell and verify taps
+    outside the shared button rectangles do not trigger an action.
+
 ## Validation and changed files
 
 - Original Waveshare default target built successfully immediately after board
   extraction. Both final target builds use the pinned dependencies above.
-- Host suite: **108 tests, 38,817 assertions, all passed** (102 original tests plus
-  six layout/action tests). Coverage includes every current PMD pack and visible
-  care hitbox, starter/egg taps, food choices, play/light/bath/affection routing,
-  and confirmation expiry/cancellation. Hardware acquisition and framebuffer
-  output are not simulated by these host tests.
+- Host suite: **110 tests, 39,363 assertions, all passed**. Coverage includes every
+  current PMD pack; generated secondary layout cells and controls; visible home
+  navigation; starter/egg taps; food choices; training/light/bath/affection
+  routing; and confirmation expiry/cancellation. Hardware acquisition and
+  framebuffer output are not simulated by these host tests.
 - Translation format check passed. Python tools suite: **16 passed, one failed**
   on Windows: `test_los_scripts_ejecutables_declaran_shebang` assumes POSIX
   executable permissions; Windows reports `dex_data.py` as executable. The
@@ -214,13 +246,12 @@ Final firmware results:
 | Target | Compile | Application binary bytes | Static RAM reported |
 |---|---|---:|---:|
 | Waveshare | PASS | 812,192 | 33,548 |
-| T-Deck Plus | PASS | 703,824 | 31,388 |
+| T-Deck Plus | PASS | 713,296 | 31,468 |
 
 T-Deck application SHA-256:
-`3d68e3a35f3c980d6d5295007ea841aa0e36356288f82879696ba11bbfca385d`.
+`82f85dcea5b2a55ead3d52294d08b6c37926f142619a8f08c8de66798c01200e`.
 Waveshare application SHA-256:
-`b2734b4a27afad01cfc709b49429c9f974542a5d4529c198f579cffa519cca6a`.
-Each output directory also contains `SHA256SUMS.txt` for the split image pieces.
+`c34465f42e5d9fcb9b954d4d4b116aadaffb6347d85e91893fbc382517f54bae`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.

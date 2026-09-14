@@ -375,8 +375,9 @@ who built one and reported what they found.
 
 This is an unofficial fan project, not affiliated with or endorsed by Nintendo.
 
-## T-Deck Plus (primer port jugable)
+## T-Deck Plus (port jugable)
 
 La Waveshare sigue siendo la placa predeterminada. Para compilar el target separado
 T-Deck Plus, consultar [TDECK_PLUS_BRINGUP.md](TDECK_PLUS_BRINGUP.md): alcance,
-versiones, firmware, conservacion de partidas y pruebas pendientes en hardware.
+versiones, firmware, UI secundaria, conservacion de partidas y pruebas pendientes
+en hardware.
