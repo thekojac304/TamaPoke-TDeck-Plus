@@ -1,5 +1,6 @@
 #include "framework.h"
 #include "../src/board/tdeck_plus/time_sync_policy.h"
+#include "../src/board/tdeck_plus/timezone_policy.h"
 #include "../src/ui/time_ui.h"
 
 TEST(time_sync, gps_success_wins_and_source_is_visible) {
@@ -70,4 +71,30 @@ TEST(time_sync, manual_catchup_requires_forward_sane_reference_and_confirmation)
   CHECK(!p.prepare(reference,reference));
   CHECK(!p.prepare(reference,reference-1));
   CHECK(!p.prepare(reference,reference+TpTime::MAX_DELTA+1));
+}
+
+TEST(time_sync, utc_converts_to_eastern_standard_time) {
+  uint32_t utc=TpTimezone::epoch(2026,1,15,17,0,0);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,utc),-5*3600);
+  CHECK_EQ(utc+TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,utc),TpTimezone::epoch(2026,1,15,12,0,0));
+}
+
+TEST(time_sync, utc_converts_to_eastern_daylight_time) {
+  uint32_t utc=TpTimezone::epoch(2026,7,15,16,0,0);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,utc),-4*3600);
+  CHECK_EQ(utc+TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,utc),TpTimezone::epoch(2026,7,15,12,0,0));
+}
+
+TEST(time_sync, timezone_changes_presentation_not_authoritative_timeline) {
+  uint32_t utc=TpTimezone::epoch(2026,7,15,16,0,0);
+  uint32_t eastern=utc+TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,utc);
+  uint32_t pacific=utc+TpTimezone::offsetSeconds(TpTimezone::US_PACIFIC,2026,utc);
+  CHECK(eastern!=pacific); CHECK_EQ(utc,TpTimezone::epoch(2026,7,15,16,0,0));
+}
+
+TEST(time_sync, timezone_change_cannot_duplicate_authoritative_catchup) {
+  TpTime::SyncPolicy p; CHECK(p.accept(TpTime::GPS,TpTimezone::epoch(2026,7,15,16)));
+  CHECK(p.consumeCatchup());
+  (void)TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,TpTimezone::epoch(2026,7,15,16));
+  CHECK(!p.consumeCatchup());
 }

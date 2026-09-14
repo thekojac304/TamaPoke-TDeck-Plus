@@ -7,7 +7,7 @@
 #include <FS.h>
 namespace Board {
 struct TouchSample { bool pressed; int16_t x, y; };
-struct AuxiliaryInput { bool centerPressed; bool activity; };
+struct AuxiliaryInput { bool centerPressed; bool activity; uint8_t key; };
 Arduino_Canvas *canvas();
 bool begin(Arduino_Canvas *canvas);
 bool sampleTouch(TouchSample &sample, bool wasPressed);

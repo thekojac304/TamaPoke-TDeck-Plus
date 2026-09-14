@@ -12,6 +12,7 @@ using namespace TDeckPins;
 static TouchDrvGT911 touch;
 static bool touchOk = false, storageOk = false;
 static uint8_t timeoutIndex=TpDisplay::DEFAULT_TIMEOUT;
+static constexpr uint8_t KEYBOARD_ADDRESS=0x55;
 // Match LILYGO's SPI mode 0. Arduino_ST7789 otherwise overrides it to mode 3.
 class PlusPanel : public Arduino_ST7789 {
 public:
@@ -72,8 +73,11 @@ bool sampleAuxiliaryInput(AuxiliaryInput &s) {
  const int pins[5]={trackUp,trackRight,trackDown,trackLeft,trackCenter};
  uint8_t state=0;
  for (int i=0;i<5;++i) if (digitalRead(pins[i])!=LOW) state|=1u<<i;
- s.centerPressed=(state&(1u<<4))==0;
+ s.centerPressed=(state&(1u<<4))==0; s.key=0;
  s.activity=initialized&&((state^prior)&0x0F)!=0;
+ if (Wire.requestFrom(KEYBOARD_ADDRESS,(uint8_t)1)==1) {
+  s.key=(uint8_t)Wire.read(); if (s.key) s.activity=true;
+ }
  prior=state; initialized=true; return true;
 }
 uint8_t displayTimeoutIndex() { return timeoutIndex; }

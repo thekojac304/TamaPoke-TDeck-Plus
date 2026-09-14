@@ -3,6 +3,7 @@
 #include "../../../rtcbat.h"
 #include "pins.h"
 #include "time_sync_policy.h"
+#include "timezone_policy.h"
 #include "battery_policy.h"
 #include <Preferences.h>
 #include <WiFi.h>
@@ -10,6 +11,7 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <sys/time.h>
+#include <time.h>
 
 // GPS/NTP supply UTC. tp-clock pairs it with the game's local-wall-shaped
 // epoch. NTP credentials are private to TamaPoke and are never printed.
@@ -22,11 +24,12 @@ enum WifiAction:uint8_t { WIFI_NONE=0,WIFI_AUTO_NTP,WIFI_MANUAL_NTP,WIFI_CONNECT
 enum WifiCommand:uint8_t { WIFI_CMD_NONE=0,WIFI_CMD_ENABLE,WIFI_CMD_DISABLE,WIFI_CMD_SCAN,WIFI_CMD_CONNECT_SAVED,WIFI_CMD_CONNECT_CANDIDATE,WIFI_CMD_FORGET,WIFI_CMD_SYNC };
 
 static bool clockValid=false,mapped=false,trusted=false,authoritative=false,lastSyncCatchupAllowed=false;
-static bool gpsSeen=false,autoStarted=false,autoFailed=false,scanning=false;
+static bool gpsSeen=false,autoStarted=false,autoFailed=false,scanning=false,wifiBeginPending=false;
 static bool wifiOn=false,wifiConfigured=false;
 static uint32_t savedWall=0,savedUtc=0,sourceUtc=0,sourceAtMs=0,lastPersistMs=0;
 static uint32_t bootAtMs=0,wifiStartedAt=0,ntpStartedAt=0,wallBeforeNtp=0,gpsManualUntil=0;
 static int32_t wallOffset=0;
+static TpTimezone::Preset timezonePreset=TpTimezone::UTC;
 static volatile bool ntpSynced=false;
 static RtcTimeSource timeSource=RTC_TIME_LOCAL;
 static RtcSyncState syncState=RTC_SYNC_GPS_SEARCHING;
@@ -37,6 +40,7 @@ static TpTime::ManualCatchupPolicy manualCatchup;
 static char savedSsid[33]={0},savedPass[65]={0},candidateSsid[33]={0},candidatePass[65]={0};
 static char feedback[28]={0}; static uint32_t feedbackUntil=0;
 static char scanSsid[MAX_SCAN_RESULTS][33]={{0}}; static int scanRssi[MAX_SCAN_RESULTS]={0},scanCount=0;
+static int lastWifiStatus=-999; static uint8_t lastDisconnectReason=0;
 static HardwareSerial gps(1);
 static char nmea[112]; static uint8_t nmeaLen=0;
 enum NmeaType:uint8_t { NMEA_OTHER=0,NMEA_RMC,NMEA_ZDA,NMEA_GGA,NMEA_GLL,NMEA_GSA,NMEA_GSV,NMEA_VTG,NMEA_TXT };
@@ -84,18 +88,30 @@ static void clearWifiAction(const char *action) {
 }
 
 static bool validEpoch(uint32_t e) { return e>=MIN_VALID_EPOCH&&e<=MAX_VALID_EPOCH; }
+static int64_t daysFromCivil(int y,unsigned m,unsigned d);
 static void setFeedback(const char *text) { snprintf(feedback,sizeof(feedback),"%s",text?text:""); feedbackUntil=millis()+3500; }
 static void setSystem(uint32_t e) { timeval tv{(time_t)e,0}; clockValid=settimeofday(&tv,nullptr)==0; }
 static uint32_t currentUtc() { return sourceUtc?sourceUtc+(millis()-sourceAtMs)/1000:0; }
 static uint32_t wallFromUtc(uint32_t utc) {
-  int64_t wall=(int64_t)utc+wallOffset;
+  time_t value=(time_t)utc; struct tm local{}; localtime_r(&value,&local);
+  int64_t wall=daysFromCivil(local.tm_year+1900,(unsigned)local.tm_mon+1,(unsigned)local.tm_mday)*86400+
+               local.tm_hour*3600+local.tm_min*60+local.tm_sec;
   return wall>=MIN_VALID_EPOCH&&wall<=MAX_VALID_EPOCH?(uint32_t)wall:0;
+}
+static uint32_t utcFromWall(uint32_t wall) {
+  time_t value=(time_t)wall; struct tm local{}; gmtime_r(&value,&local); local.tm_isdst=-1;
+  time_t utc=mktime(&local); return utc>=MIN_VALID_EPOCH&&utc<=MAX_VALID_EPOCH?(uint32_t)utc:0;
+}
+static void applyTimezone() {
+  setenv("TZ",TpTimezone::posix(timezonePreset),1); tzset();
+  Serial.printf("CLOCK timezone=%s posix=%s\n",TpTimezone::label(timezonePreset),TpTimezone::posix(timezonePreset));
 }
 static void persistNow(uint32_t wall,uint32_t utc) {
   if (!validEpoch(wall)) return;
   savedWall=wall;
   Preferences p; p.begin("tp-clock",false); p.putUInt("wall",wall); p.putBool("trusted",trusted);
   if (mapped&&validEpoch(utc)) {
+    wallOffset=(int32_t)((int64_t)wall-utc);
     savedUtc=utc; p.putUInt("utc",utc); p.putInt("offset",wallOffset); p.putBool("mapped",true);
   } else {
     p.putBool("mapped",false); p.remove("utc"); p.remove("offset");
@@ -110,7 +126,7 @@ static void radioOff(const char *reason) {
   // Keep teardown single-shot and perform every transition from rtcPoll.
   esp_sntp_stop();
   if (WiFi.getMode()!=WIFI_OFF) { WiFi.disconnect(false,false); WiFi.mode(WIFI_OFF); }
-  wifiStartedAt=ntpStartedAt=0; ntpSynced=false; wifiAction=WIFI_NONE;
+  wifiStartedAt=ntpStartedAt=0; ntpSynced=false; wifiAction=WIFI_NONE; wifiBeginPending=false;
   Serial.printf("WIFI radio=off reason=%s\n",reason?reason:"idle");
 }
 static int64_t daysFromCivil(int y,unsigned m,unsigned d) {
@@ -206,14 +222,26 @@ static bool pollGps(uint32_t &utc) {
   return parsed;
 }
 static void onNtpSync(timeval *) { ntpSynced=true; }
+static void onWifiEvent(WiFiEvent_t event,WiFiEventInfo_t info) {
+  if (event==ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+    Serial.println("WIFI auth=success dhcp=waiting");
+  } else if (event==ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    String ip=WiFi.localIP().toString(); Serial.printf("WIFI dhcp=acquired ip=%s\n",ip.c_str());
+  } else if (event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    lastDisconnectReason=info.wifi_sta_disconnected.reason;
+    Serial.printf("WIFI disconnected reason=%u auth=%s\n",(unsigned)lastDisconnectReason,
+                  lastDisconnectReason==WIFI_REASON_AUTH_FAIL||lastDisconnectReason==WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT?"failed":"not-established");
+  }
+}
 static bool beginWifi(WifiAction action,const char *ssid,const char *pass) {
   if (!wifiOn) { setFeedback("WIFI OFF"); return false; }
   if (!ssid||!ssid[0]) { setFeedback("WIFI NOT CONFIGURED"); return false; }
   if (scanning) { setFeedback("WIFI BUSY"); return false; }
-  WiFi.mode(WIFI_STA); WiFi.disconnect(false,false); WiFi.begin(ssid,pass?pass:"");
+  WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
   wifiAction=action; wifiStartedAt=millis(); ntpStartedAt=0; ntpSynced=false; syncState=RTC_SYNC_WIFI_CONNECTING;
-  Serial.printf("CLOCK Wi-Fi connect purpose=%s credentials=tp-wifi\n",
-                action==WIFI_AUTO_NTP?"auto-ntp":action==WIFI_MANUAL_NTP?"manual-ntp":"setup");
+  wifiBeginPending=true; lastWifiStatus=(int)WiFi.status(); lastDisconnectReason=0;
+  Serial.printf("WIFI connect staged ssid=\"%s\" password_length=%u purpose=%s credentials=tp-wifi\n",ssid,
+                (unsigned)strlen(pass?pass:""),action==WIFI_AUTO_NTP?"auto-ntp":action==WIFI_MANUAL_NTP?"manual-ntp":"setup");
   return true;
 }
 static bool saveCandidate() {
@@ -280,6 +308,14 @@ static void serviceWifiCommand() {
 }
 static void pollWifi(uint32_t now) {
   pollScan(); serviceWifiCommand(); if (wifiAction==WIFI_NONE) return;
+  if (wifiBeginPending&&now-wifiStartedAt>=200) {
+    const char *ssid=wifiAction==WIFI_CONNECT_CANDIDATE?candidateSsid:savedSsid;
+    const char *pass=wifiAction==WIFI_CONNECT_CANDIDATE?candidatePass:savedPass;
+    wifiBeginPending=false; wl_status_t result=WiFi.begin(ssid,pass);
+    Serial.printf("WIFI begin ssid=\"%s\" password_length=%u return_status=%d\n",ssid,(unsigned)strlen(pass),(int)result);
+  }
+  int status=(int)WiFi.status();
+  if (status!=lastWifiStatus) { Serial.printf("WIFI state previous=%d current=%d\n",lastWifiStatus,status); lastWifiStatus=status; }
   if (!ntpStartedAt&&WiFi.status()==WL_CONNECTED) {
     if (wifiAction==WIFI_CONNECT_CANDIDATE) { bool saved=saveCandidate(); if (saved) setFeedback("WIFI SAVED"); syncState=RTC_SYNC_IDLE; radioOff(saved?"candidate-saved":"candidate-save-failed"); clearWifiAction("connect-candidate"); return; }
     if (wifiAction==WIFI_CONNECT_SAVED) { setFeedback("WIFI CONNECTED"); syncState=RTC_SYNC_IDLE; radioOff("connection-verified"); clearWifiAction("connect-saved"); return; }
@@ -287,7 +323,10 @@ static void pollWifi(uint32_t now) {
     sntp_set_time_sync_notification_cb(onNtpSync); configTime(0,0,"pool.ntp.org","time.cloudflare.com");
     Serial.println("CLOCK source=WIFI NTP requested");
   }
-  if (!ntpStartedAt&&now-wifiStartedAt>WIFI_WAIT_MS) { failWifi("WIFI CONNECT FAILED"); return; }
+  if (!ntpStartedAt&&!wifiBeginPending&&now-wifiStartedAt>WIFI_WAIT_MS) {
+    Serial.printf("WIFI connect timeout status=%d disconnect_reason=%u\n",status,(unsigned)lastDisconnectReason);
+    failWifi(lastDisconnectReason==WIFI_REASON_AUTH_FAIL||lastDisconnectReason==WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT?"WIFI AUTH FAILED":"WIFI CONNECT FAILED"); return;
+  }
   if (ntpStartedAt&&!ntpSynced&&now-ntpStartedAt>NTP_WAIT_MS) failWifi("NTP FAILED");
 }
 static void startAutomaticFallback(uint32_t now) {
@@ -314,12 +353,12 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
     }
     wallEpoch=wallFromUtc(utc); if (!validEpoch(wallEpoch)) return false;
   } else {
-    wallOffset=0; wallEpoch=utc;
-    Serial.println("CLOCK unmapped local reference; using UTC without offline guess");
+    wallEpoch=wallFromUtc(utc);
+    Serial.printf("CLOCK first authoritative mapping timezone=%s\n",rtcTimezoneLabel());
   }
   if (!policy.accept(source==RTC_TIME_GPS?TpTime::GPS:TpTime::WIFI,utc)) return false;
   mapped=true; trusted=true; authoritative=true; lastSyncCatchupAllowed=hadMapping&&policy.consumeCatchup(); timeSource=source; syncState=RTC_SYNC_IDLE;
-  sourceUtc=utc; sourceAtMs=now; savedUtc=utc; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
+  sourceUtc=utc; sourceAtMs=now; savedUtc=utc; savedWall=wallEpoch; setSystem(utc); persistNow(wallEpoch,utc);
   if (wifiAction!=WIFI_NONE) { radioOff("time-synced"); clearWifiAction("ntp-sync"); }
   setFeedback(source==RTC_TIME_GPS?"GPS TIME OK":"WIFI TIME OK");
   if (source==RTC_TIME_GPS) Serial.printf("GPS authoritative accepted=1 utc=%lu catchup=%d\n",(unsigned long)utc,lastSyncCatchupAllowed?1:0);
@@ -330,16 +369,18 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
 bool rtcBegin(uint32_t petSavedWall) {
   Preferences p; p.begin("tp-clock",true); savedWall=p.getUInt("wall",0); savedUtc=p.getUInt("utc",0);
   mapped=p.getBool("mapped",false)&&validEpoch(savedWall)&&validEpoch(savedUtc);
-  trusted=p.getBool("trusted",mapped)&&validEpoch(savedWall); wallOffset=p.getInt("offset",0); p.end();
+  trusted=p.getBool("trusted",mapped)&&validEpoch(savedWall); wallOffset=p.getInt("offset",0);
+  timezonePreset=TpTimezone::valid(p.getUChar("tz",TpTimezone::UTC)); p.end(); applyTimezone();
   // Keep the previous tp-clock acceptance range for backward compatibility.
   if (wallOffset<-2*86400L||wallOffset>2*86400L) mapped=false;
   Preferences w; bool wifiNvs=w.begin("tp-wifi",true); if (wifiNvs) { wifiOn=w.getBool("on",false); w.getString("ssid",savedSsid,sizeof(savedSsid)); w.getString("pass",savedPass,sizeof(savedPass)); w.end(); }
   wifiConfigured=savedSsid[0]; uint32_t restore=validEpoch(savedWall)?savedWall:0;
   if (petSavedWall>restore&&validEpoch(petSavedWall)) restore=petSavedWall;
-  if (restore) setSystem(restore);
+  if (mapped) setSystem(savedUtc); else if (restore) setSystem(restore);
   bootAtMs=millis();
   if (mapped) { sourceUtc=savedUtc; sourceAtMs=bootAtMs; }
   syncState=RTC_SYNC_GPS_SEARCHING; startGps(GPS_PRIMARY_BAUD,"tdeck-plus-default");
+  WiFi.onEvent(onWifiEvent);
   Serial.printf("CLOCK boot saved_wall=%lu saved_utc=%lu offset=%ld mapped=%d wifi=%s\n",
                 (unsigned long)savedWall,(unsigned long)savedUtc,(long)wallOffset,mapped?1:0,!wifiOn?"off":wifiConfigured?"configured":"not-configured");
   esp_reset_reason_t resetReason=esp_reset_reason();
@@ -349,7 +390,10 @@ bool rtcBegin(uint32_t petSavedWall) {
   wifiBreadcrumbMagic=WIFI_BREADCRUMB_MAGIC; wifiBreadcrumbAction=WIFI_CMD_NONE;
   return true;
 }
-uint32_t rtcEpoch() { return clockValid?(uint32_t)time(nullptr):0; }
+uint32_t rtcEpoch() {
+  if (!clockValid) return 0; uint32_t systemEpoch=(uint32_t)time(nullptr);
+  return mapped?wallFromUtc(systemEpoch):systemEpoch;
+}
 void rtcSetEpoch(uint32_t e) { setSystem(e); }
 bool rtcPollAuthoritative(uint32_t &wallEpoch) {
   uint32_t now=millis(),utc=0;
@@ -368,12 +412,9 @@ void rtcManualClockSet(uint32_t wallEpoch) {
   manualCatchup.cancel();
   uint32_t utc=currentUtc(); policy.setManual(); trusted=true; timeSource=RTC_TIME_MANUAL; syncState=RTC_SYNC_IDLE; setFeedback("MANUAL TIME SET");
   if (authoritative&&validEpoch(utc)) {
-    int64_t offset=(int64_t)wallEpoch-utc;
-    // The UI edits only HH:MM. Choose the nearest real timezone day so a
-    // late-evening local time beside an early UTC hour does not store +20 h.
-    while (offset>14*3600L) { wallEpoch-=86400; offset-=86400; }
-    while (offset<-12*3600L) { wallEpoch+=86400; offset+=86400; }
-    wallOffset=(int32_t)offset; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
+    uint32_t enteredUtc=utcFromWall(wallEpoch);
+    if (!validEpoch(enteredUtc)) { setFeedback("INVALID LOCAL TIME"); return; }
+    sourceUtc=enteredUtc; sourceAtMs=millis(); savedWall=wallEpoch; setSystem(enteredUtc); persistNow(wallEpoch,enteredUtc);
   } else {
     mapped=false; savedUtc=0; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,0);
   }
@@ -391,10 +432,9 @@ bool rtcApplyManualCatchup(uint32_t referenceWall,uint32_t newWall) {
   if (!manualCatchup.consume(referenceWall,newWall)) { setFeedback("CATCH-UP EXPIRED"); return false; }
   policy.setManual(); trusted=true; timeSource=RTC_TIME_MANUAL; syncState=RTC_SYNC_IDLE;
   if (mapped) {
-    int64_t utc64=(int64_t)newWall-wallOffset;
-    uint32_t utc=utc64>=MIN_VALID_EPOCH&&utc64<=MAX_VALID_EPOCH?(uint32_t)utc64:0;
+    uint32_t utc=utcFromWall(newWall);
     if (!validEpoch(utc)) { setFeedback("INVALID TIME JUMP"); return false; }
-    sourceUtc=utc; sourceAtMs=millis(); setSystem(newWall); persistNow(newWall,utc);
+    sourceUtc=utc; sourceAtMs=millis(); setSystem(utc); persistNow(newWall,utc);
   } else {
     mapped=false; savedUtc=0; setSystem(newWall); persistNow(newWall,0);
   }
@@ -405,6 +445,17 @@ RtcTimeSource rtcTimeSource() { return timeSource; }
 RtcSyncState rtcSyncState() { return syncState; }
 const char *rtcTimeStatusLabel() {
   return TpTime::sourceLabel((TpTime::Source)timeSource);
+}
+const char *rtcTimezoneLabel() { return TpTimezone::label(timezonePreset); }
+uint8_t rtcTimezoneIndex() { return (uint8_t)timezonePreset; }
+uint32_t rtcSetTimezoneIndex(uint8_t index) {
+  timezonePreset=TpTimezone::valid(index); applyTimezone();
+  Preferences p; if (p.begin("tp-clock",false)) { p.putUChar("tz",(uint8_t)timezonePreset); p.end(); }
+  uint32_t utc=mapped?(uint32_t)time(nullptr):0,wall=validEpoch(utc)?wallFromUtc(utc):rtcEpoch();
+  if (mapped&&validEpoch(wall)) persistNow(wall,utc);
+  setFeedback("TIMEZONE CHANGED");
+  Serial.printf("CLOCK timezone changed authoritative_utc=%lu local_wall=%lu catchup=0\n",(unsigned long)utc,(unsigned long)wall);
+  return wall;
 }
 const char *rtcSyncFeedback() { return feedback[0]&&(int32_t)(feedbackUntil-millis())>0?feedback:nullptr; }
 bool rtcAutomaticSyncFailed() { return policy.consumeFailurePrompt(autoFailed); }
@@ -442,6 +493,7 @@ bool rtcWifiConnectSaved() {
 bool rtcWifiConnectCandidate(const char *ssid,const char *password) {
   if (!ssid||!ssid[0]) return false;
   snprintf(candidateSsid,sizeof(candidateSsid),"%s",ssid); snprintf(candidatePass,sizeof(candidatePass),"%s",password?password:"");
+  Serial.printf("WIFI candidate ssid=\"%s\" password_length=%u terminated=1\n",candidateSsid,(unsigned)strlen(candidatePass));
   queueWifi(WIFI_CMD_CONNECT_CANDIDATE); setFeedback("WIFI CONNECT QUEUED"); return true;
 }
 

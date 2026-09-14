@@ -33,6 +33,9 @@ bool rtcAutomaticSyncFailed() { return false; }
 bool rtcLastSyncAllowsCatchup() { return true; }
 void rtcRequestGpsSync() {}
 void rtcRequestWifiSync() {}
+const char *rtcTimezoneLabel() { return "LOCAL"; }
+uint8_t rtcTimezoneIndex() { return 0; }
+uint32_t rtcSetTimezoneIndex(uint8_t) { return rtcEpoch(); }
 bool rtcWifiEnabled() { return false; }
 bool rtcWifiConfigured() { return false; }
 const char *rtcWifiSsid() { return ""; }

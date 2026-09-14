@@ -158,6 +158,8 @@ static void renderCompactSettings() {
   snprintf(clock,sizeof(clock),"%02lu:%02lu",(unsigned long)((wall/3600)%24),(unsigned long)((wall/60)%60));
   compactCentered(clock,Layout::settingsClock,2);
   compactCentered(rtcTimeStatusLabel(),Layout::settingsSource,2);
+  char timezone[40]; snprintf(timezone,sizeof(timezone),"TIMEZONE: %s >",rtcTimezoneLabel());
+  compactButton(Layout::settingsTimezone,timezone,UI_WHITE);
   compactButton(Layout::syncGps,"SYNC GPS",UI_WHITE);
   compactButton(Layout::syncWifi,"SYNC WI-FI",UI_WHITE);
   compactButton(Layout::manualTime,"SET MANUALLY",UI_WHITE);
@@ -213,15 +215,16 @@ static void renderCompactWifi() {
   compactScreenTitle("SETTINGS"); compactSettingsTabs(1);
   compactButton(Layout::wifiToggle,rtcWifiEnabled()?"WIFI: ON":"WIFI: OFF",rtcWifiEnabled()?UI_BAR_OK:UI_WHITE);
   char network[44];
-  if (rtcWifiConfigured()) snprintf(network,sizeof(network),"SSID: %s",rtcWifiSsid());
-  else snprintf(network,sizeof(network),"Wi-Fi not configured");
+  if (rtcWifiConfigured()) snprintf(network,sizeof(network),"KNOWN: %s",rtcWifiSsid());
+  else snprintf(network,sizeof(network),"KNOWN: NONE");
   compactButton(Layout::wifiNetwork,network,UI_WHITE);
   compactButton(Layout::wifiScan,rtcWifiScanning()?"SCANNING":"SCAN",UI_WHITE);
   compactButton(Layout::wifiConnect,"CONNECT",UI_WHITE);
   compactButton(Layout::wifiForget,"FORGET",UI_WHITE);
   compactButton(Layout::wifiSyncTime,"SYNC TIME",UI_BAR_OK);
   const char *feedback=rtcSyncFeedback();
-  if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::wifiFeedback,1); }
+  gfx->setTextColor(feedback?UI_BAR_BAD:Layout::secondaryText);
+  compactCentered(feedback?feedback:"NOT CONNECTED (LOW POWER)",Layout::wifiFeedback,1);
   gfx->flush();
 }
 
@@ -243,20 +246,15 @@ static void renderCompactNetworks() {
 
 static void renderCompactWifiPassword() {
   compactScreenTitle("WIFI PASSWORD");
-  gfx->setTextColor(Layout::secondaryText); compactText(wifiSelectedSsid,8,36,256,1);
-  static const char keys[]="abcdefghijklmnopqrstuvwxyz0123456789.-";
-  static const char symbols[]="!@#$%^&*()_+=[]{}:;,.?/-\\|'\"~`<> ";
-  for (int i=0;i<42;++i) {
-    const auto r=Layout::wifiPasswordKey(i); char key[3]={0}; const char *label=key;
-    if (i<38) {
-      char c=wifiPasswordMode==2?symbols[i%strlen(symbols)]:keys[i];
-      key[0]=wifiPasswordMode==1&&c>='a'&&c<='z'?c-'a'+'A':c;
-    } else label=i==38?"aA#":i==39?"<-":i==40?"X":"OK";
-    compactButton(r,label,i>=40?UI_BAR_WARN:UI_WHITE);
-  }
+  gfx->setTextColor(Layout::secondaryText); compactText(wifiSelectedSsid,12,42,256,1);
   char masked[34]; int shown=wifiPasswordLen>32?32:wifiPasswordLen;
   memset(masked,'*',shown); masked[shown]=0;
-  gfx->fillRoundRect(8,34,256,18,4,UI_WHITE); gfx->setTextColor(UI_INK); compactText(masked,12,39,248,1);
+  gfx->fillRoundRect(Layout::wifiPasswordField.x,Layout::wifiPasswordField.y,Layout::wifiPasswordField.w,Layout::wifiPasswordField.h,5,UI_WHITE);
+  gfx->setTextColor(UI_INK); compactText(masked[0]?masked:"_",18,82,280,2);
+  gfx->setTextColor(Layout::secondaryText); compactText("TYPE ON PHYSICAL KEYBOARD",42,122,236,1);
+  compactText("ENTER: CONNECT   ESC: CANCEL",40,144,240,1);
+  compactButton(Layout::wifiPasswordConnect,"CONNECT",UI_BAR_OK);
+  compactButton(Layout::wifiPasswordCancel,"CANCEL",UI_WHITE);
   gfx->flush();
 }
 
@@ -282,7 +280,8 @@ static void compactClockTap(int16_t x,int16_t y) {
     for (int i=0;i<3;++i) if (Layout::settingsTabs[i].contains(x,y)) { clockPage=i==0?0:i==1?2:6; return; }
   }
   if (clockPage==0) {
-    if (Layout::syncGps.contains(x,y)) rtcRequestGpsSync();
+    if (Layout::settingsTimezone.contains(x,y)) { uint32_t wall=rtcSetTimezoneIndex((rtcTimezoneIndex()+1)%5); if (wall) pet.setClock(wall); }
+    else if (Layout::syncGps.contains(x,y)) rtcRequestGpsSync();
     else if (Layout::syncWifi.contains(x,y)) rtcRequestWifiSync();
     else if (Layout::manualTime.contains(x,y)) openManualClock();
     return;
@@ -326,20 +325,9 @@ static void compactClockTap(int16_t x,int16_t y) {
     }
     return;
   }
-  if (clockPage==4&&Layout::wifiPasswordArea.contains(x,y)) {
-    int col=(x-Layout::wifiPasswordArea.x)/Layout::wifiPasswordCellW;
-    int row=(y-Layout::wifiPasswordArea.y)/Layout::wifiPasswordCellH;
-    int i=row*Layout::wifiPasswordCols+col;
-    if (i<0||i>=42||!Layout::wifiPasswordKey(i).contains(x,y)) return;
-    static const char keys[]="abcdefghijklmnopqrstuvwxyz0123456789.-";
-    static const char symbols[]="!@#$%^&*()_+=[]{}:;,.?/-\\|'\"~`<> ";
-    if (i<38&&wifiPasswordLen<sizeof(wifiPassword)-1) {
-      char c=wifiPasswordMode==2?symbols[i%strlen(symbols)]:keys[i];
-      wifiPassword[wifiPasswordLen++]=wifiPasswordMode==1&&c>='a'&&c<='z'?c-'a'+'A':c; wifiPassword[wifiPasswordLen]=0;
-    } else if (i==38) wifiPasswordMode=(wifiPasswordMode+1)%3;
-    else if (i==39&&wifiPasswordLen) wifiPassword[--wifiPasswordLen]=0;
-    else if (i==40) clockPage=2;
-    else if (i==41) { rtcWifiConnectCandidate(wifiSelectedSsid,wifiPassword); clockPage=2; }
+  if (clockPage==4) {
+    if (Layout::wifiPasswordConnect.contains(x,y)) { rtcWifiConnectCandidate(wifiSelectedSsid,wifiPassword); clockPage=2; }
+    else if (Layout::wifiPasswordCancel.contains(x,y)) clockPage=2;
   }
 }
 

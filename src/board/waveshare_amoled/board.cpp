@@ -49,7 +49,7 @@ bool sampleTouch(TouchSample &s, bool wasPressed) {
  s.pressed = touch.getPoint(&s.x, &s.y, 1) > 0;
  return true;
 }
-bool sampleAuxiliaryInput(AuxiliaryInput &) { return false; }
+bool sampleAuxiliaryInput(AuxiliaryInput &s) { s={false,false,0}; return false; }
 uint8_t displayTimeoutIndex() { return 5; }
 uint32_t displayTimeoutMs() { return 0; }
 const char *displayTimeoutLabel() { return "NEVER"; }

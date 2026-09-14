@@ -30,6 +30,9 @@ bool rtcAutomaticSyncFailed();
 bool rtcLastSyncAllowsCatchup();
 void rtcRequestGpsSync();
 void rtcRequestWifiSync();
+const char *rtcTimezoneLabel();
+uint8_t rtcTimezoneIndex();
+uint32_t rtcSetTimezoneIndex(uint8_t index);
 
 // Minimal T-Deck station configuration, used only for NTP fallback.
 bool rtcWifiEnabled();

@@ -72,14 +72,15 @@ now emit the same existing IDs as the round UI. The T-Deck backend logs queued,
 started, completed and cancelled/discarded IDs, stops the current tone on mute or
 sleep, clears queued effects, and still releases I2S after each burst.
 
-The previous first authoritative sync deliberately preserved a stale legacy
-wall value, while the already-open Settings screen retained its old edit buffer.
-That produced `TIME: SYNC` without a corrected displayed clock. An unmapped
-legacy clock now adopts trustworthy UTC without inventing offline elapsed time;
-after the user sets local time, the normal `offset` mapping is persisted. A
-mapped clock applies safe powered-off catch-up once. Settings renders the live
-wall clock and refreshes the manual editor immediately when sync arrives, which
-also updates day/night rendering through `pet.lastSeenEpoch`.
+GPS and NTP were parsed as UTC but the first authoritative mapping used a zero
+wall offset, so UTC was displayed directly. The ESP32 system clock now stays on
+the authoritative UTC timeline. User-facing and local-gameplay values are
+projected through a persisted POSIX timezone preset. The preset list is UTC, US
+Eastern, Central, Mountain, and Pacific; US zones use the current second-Sunday
+in March/first-Sunday in November DST rules. A missing setting defaults to UTC
+and must be selected explicitly. Changing it calls `setClock()`, never
+`syncClock()`, so it cannot replay offline progression. Existing `tp-clock`
+wall/UTC/mapping keys remain readable.
 
 The T-Deck state flow is:
 
@@ -101,10 +102,18 @@ cap. Wi-Fi/NTP work is asynchronous and the radio is disabled again after scan,
 setup, connect, success or failure.
 
 Settings now has non-overlapping Time, Wi-Fi and System pages. Time owns the live
-time/source row plus `SYNC GPS`, `SYNC WI-FI`, and `SET MANUALLY`. Wi-Fi provides
-on/off, saved SSID, scan, connect, forget and sync controls. Scan shows nearby
-networks; selection opens a touch password keyboard with lower/upper/symbol
-pages. Credentials are saved only after a successful connection.
+local time, authoritative source, timezone preset, `SYNC GPS`, `SYNC WI-FI`, and
+`SET MANUALLY`. Wi-Fi provides on/off, known SSID, low-power disconnected status,
+scan, connect, forget and sync controls. Scan selection opens a masked password
+field driven by the physical keyboard at I2C address `0x55`; printable ASCII,
+backspace/delete, Enter and Escape are supported, while Connect and Cancel remain
+touch controls. Credentials are saved only after successful authentication and
+DHCP, and are retained while Wi-Fi is off.
+
+The connection failure path was a scan-radio teardown/association race: the code
+could call `WiFi.begin()` immediately after asynchronous scan cleanup and station
+disconnect. Association is now staged for 200 ms on the main loop, uses owned,
+NUL-terminated buffers, and logs station states/events without logging secrets.
 
 TamaPoke never reads Launcher, Meshtastic, WadaMesh or generic ESP32 station
 credentials. Its new NVS namespace is `tp-wifi`:
@@ -124,6 +133,7 @@ T-Deck-specific state is isolated from the existing pet-save schema:
 | `tp-clock` | `offset` | int32 | Wall-minus-UTC offset |
 | `tp-clock` | `mapped` | bool | UTC/wall pair is valid |
 | `tp-clock` | `trusted` | bool | Manual catch-up has a valid reference |
+| `tp-clock` | `tz` | uint8 | POSIX timezone preset index; absent/invalid means UTC |
 | `tp-display` | `timeout` | uint8 | 0..5 timeout choice; default 2 (two minutes) |
 
 The `trusted` key is backward-compatible: a valid legacy mapped pair is treated
@@ -150,10 +160,15 @@ WIFI action=scan phase=begin heap=<bytes> min=<bytes> largest_internal=<bytes> s
 WIFI action=scan phase=complete heap=<bytes> min=<bytes> largest_internal=<bytes> state=<mode> status=<status>
 ```
 
-Successful NTP sync adds the connection/request lines:
+Successful Wi-Fi setup or NTP sync includes:
 
 ```text
-CLOCK Wi-Fi connect purpose=<auto-ntp|manual-ntp> credentials=tp-wifi
+WIFI candidate ssid="<ssid>" password_length=<n> terminated=1
+WIFI connect staged ssid="<ssid>" password_length=<n> purpose=<setup|auto-ntp|manual-ntp> credentials=tp-wifi
+WIFI begin ssid="<ssid>" password_length=<n> return_status=<status>
+WIFI state previous=<status> current=<status>
+WIFI auth=success dhcp=waiting
+WIFI dhcp=acquired ip=<address>
 CLOCK source=WIFI NTP requested
 CLOCK source=WIFI acquired_utc=<epoch>
 CLOCK references saved_utc=<epoch-or-0> saved_wall=<epoch-or-0> offset=<seconds>
@@ -170,7 +185,9 @@ CLOCK automatic sync failed gps=<no-time|no-data> wifi=<disabled|not-configured>
 or, after a configured network attempt:
 
 ```text
-CLOCK Wi-Fi/NTP failed reason=<WIFI CONNECT FAILED|NTP FAILED>
+WIFI disconnected reason=<code> auth=<failed|not-established>
+WIFI connect timeout status=<status> disconnect_reason=<code>
+CLOCK Wi-Fi/NTP failed reason=<WIFI AUTH FAILED|WIFI CONNECT FAILED|NTP FAILED>
 CLOCK automatic sync failed gps=<no-time|no-data> wifi=<reason>
 ```
 
@@ -179,17 +196,24 @@ Physical validation for this pass:
 1. Verify startup, hatch, feed, pet/heart, light sleep/wake, bath, evolution,
    ceremony, strength training and ball-game sounds; mute during a long effect
    and confirm playback/queue stop; confirm idle has no hiss.
-2. Boot outdoors and confirm the status changes from `GPS: SEARCHING` to
-   `TIME: GPS`, the displayed time changes immediately, and day/night follows.
+2. Select US Eastern, boot outdoors, and confirm `TIME: GPS` plus UTC-5 in winter
+   or UTC-4 in summer; switch UTC/Eastern/Pacific and confirm only wall display
+   and local day/night semantics move, with `catchup=0` for each timezone change.
 3. Leave Settings and then the manual editor open while GPS sync arrives; both
    must refresh without closing, overlap or stale hour/minute values.
-4. Enable Wi-Fi, scan, select a network, enter its password, connect, then sync.
-   Confirm `TIME: WIFI`, no password in serial output, and radio shutdown.
-5. Reboot after a measured powered-off interval and confirm exactly one nonzero
+4. Enable Wi-Fi, scan, select a network, enter letters/numbers/symbols with the
+   physical keyboard, test backspace, Escape, Enter, and touch Connect/Cancel.
+   Confirm masked display, `TIME: WIFI`, no password in serial output, saved
+   `KNOWN` status, automatic reuse after reboot/manual sync, and radio shutdown.
+5. Enter a deliberately wrong password and confirm an authentication reason is
+   logged, no secret appears, the device stays running, and retry succeeds.
+6. Reboot after a measured powered-off interval and confirm exactly one nonzero
    `catchup_minutes`; repeat with a backward/bad timestamp and confirm zero.
-6. Disable Wi-Fi and test GPS failure: the Set Time/Later prompt appears once,
+7. Disable Wi-Fi and test GPS failure: the Set Time/Later prompt appears once,
    Later keeps gameplay usable, and manual setting shows `TIME: MANUAL`.
-7. Smoke-test the Waveshare build for unchanged clock, layout and audio behavior.
+8. Forget the known network, verify automatic reuse stops, then toggle Wi-Fi off
+   with credentials saved and verify the radio stays off until re-enabled.
+9. Smoke-test the Waveshare build for unchanged clock, layout and audio behavior.
 
 ## Scope and architecture
 

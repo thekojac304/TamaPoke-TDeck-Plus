@@ -171,6 +171,15 @@ void handleScreenPowerInput(uint32_t now) {
   Board::AuxiliaryInput input{};
   if (!Board::sampleAuxiliaryInput(input)) return;
   if (input.activity) lastInteract=now;
+  if (input.key&&clockOpen&&clockPage==4) {
+    uint8_t key=input.key;
+    if (key==27) clockPage=2;
+    else if (key==8||key==127) { if (wifiPasswordLen) wifiPassword[--wifiPasswordLen]=0; }
+    else if (key=='\r'||key=='\n') { rtcWifiConnectCandidate(wifiSelectedSsid,wifiPassword); clockPage=2; }
+    else if (key>=32&&key<=126&&wifiPasswordLen<sizeof(wifiPassword)-1) {
+      wifiPassword[wifiPasswordLen++]=(char)key; wifiPassword[wifiPasswordLen]=0;
+    }
+  }
   if (input.centerPressed&&!wasCenter) {
     centerDownAt=now; longHandled=false; lastInteract=now;
     if (screenOff) {

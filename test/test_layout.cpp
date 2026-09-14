@@ -69,7 +69,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::languageToggle); fits(Layout::clockOnlyApply); fits(Layout::clockCatchup);
   fits(Layout::manualSource); fits(Layout::catchupInfo); fits(Layout::catchupApply); fits(Layout::catchupCancel);
   fits(Layout::settingsClock); fits(Layout::settingsSource); fits(Layout::syncGps); fits(Layout::syncWifi);
-  fits(Layout::manualTime); fits(Layout::settingsFeedback);
+  fits(Layout::manualTime); fits(Layout::settingsFeedback); fits(Layout::settingsTimezone);
   fits(Layout::timeoutSetting); fits(Layout::batteryStatus);
   fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
   fits(Layout::wifiConnect); fits(Layout::wifiForget); fits(Layout::wifiSyncTime);
@@ -99,6 +99,8 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   CHECK(!overlaps(Layout::homeBattery,Layout::homeDex));
   CHECK(!overlaps(Layout::homeBattery,Layout::homeSettings));
   CHECK(!overlaps(Layout::settingsClock,Layout::syncGps));
+  CHECK(!overlaps(Layout::settingsClock,Layout::settingsTimezone));
+  CHECK(!overlaps(Layout::settingsTimezone,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncWifi));
   CHECK(!overlaps(Layout::settingsSource,Layout::manualTime));

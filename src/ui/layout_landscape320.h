@@ -30,9 +30,10 @@ constexpr Rect trainButton{52,158,216,38};
 // T-Deck Settings uses three full pages. These rectangles are also the touch
 // hitboxes; no separate coordinate constants are allowed in the handlers.
 constexpr Rect settingsTabs[3]={{8,36,96,32},{112,36,96,32},{216,36,96,32}};
-constexpr Rect settingsClock{12,78,120,52}, settingsSource{140,78,168,52};
-constexpr Rect syncGps{12,144,92,42}, syncWifi{114,144,92,42}, manualTime{216,144,92,42};
-constexpr Rect settingsFeedback{12,190,296,14};
+constexpr Rect settingsClock{12,76,92,46}, settingsSource{112,76,196,46};
+constexpr Rect settingsTimezone{12,128,296,32};
+constexpr Rect syncGps{12,166,92,34}, syncWifi{114,166,92,34}, manualTime{216,166,92,34};
+constexpr Rect settingsFeedback{12,208,296,14};
 constexpr Rect soundToggle{12,78,140,38}, languageToggle{168,78,140,38};
 constexpr Rect timeoutSetting{12,126,296,38}, batteryStatus{12,174,296,30};
 // Manual clock page.
@@ -53,6 +54,8 @@ constexpr Rect wifiPasswordKey(int i) {
              wifiPasswordArea.y+(i/wifiPasswordCols)*wifiPasswordCellH,
              wifiPasswordCellW,wifiPasswordCellH};
 }
+constexpr Rect wifiPasswordField{12,70,296,38};
+constexpr Rect wifiPasswordConnect{12,174,142,42},wifiPasswordCancel{166,174,142,42};
 
 // Touch nickname keyboard: six columns by five rows fill the lower 180 px.
 constexpr Rect keyboardArea{1,60,318,180};
