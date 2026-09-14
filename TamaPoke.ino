@@ -289,7 +289,10 @@ void loop() {
     }
   }
 
-  updateBrightness(now);
+  // Touch/I2C handling above can take long enough for lastInteract=millis() to
+  // be newer than the loop's initial `now`. Use a fresh sample so unsigned idle
+  // arithmetic cannot wrap and look like ~49 days of inactivity.
+  updateBrightness(millis());
 
   // vuelca el autoguardado periodico SOLO con la pantalla atenuada/apagada o
   // durmiendo: la escritura a NVS congela ~1s ambos cores (caché de flash off),
@@ -366,7 +369,12 @@ void updateBrightness(uint32_t now) {
   if (pet.evolving() || pet.ceremony || pet.eating() || pet.showHeart()) {
     lastInteract = now;
   }
-  uint32_t idle = now - lastInteract;
+  uint32_t idle =
+#if TAMAPOKE_TDECK_PLUS
+    TpDisplay::idleMillis(now,lastInteract);
+#else
+    now-lastInteract;
+#endif
 #if TAMAPOKE_TDECK_PLUS
   if (!screenOff&&TpDisplay::shouldTurnOff(idle,Board::displayTimeoutIndex())) {
     pet.flushSave(); screenOff=true;

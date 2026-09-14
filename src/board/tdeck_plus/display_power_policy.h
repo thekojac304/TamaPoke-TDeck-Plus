@@ -10,6 +10,11 @@ inline const char *timeoutLabel(uint8_t index) {
   static const char *const labels[TIMEOUT_COUNT]={"30 SEC","1 MIN","2 MIN","5 MIN","10 MIN","NEVER"};
   return labels[validIndex(index)];
 }
+// Touch polling may stamp an interaction a few milliseconds after the loop's
+// cached time. Clamp that ordering jitter without breaking normal millis wrap.
+inline uint32_t idleMillis(uint32_t now,uint32_t lastInteraction) {
+  return lastInteraction>now&&lastInteraction-now<1000UL?0:now-lastInteraction;
+}
 inline bool shouldTurnOff(uint32_t idleMs,uint8_t index) {
   uint32_t limit=timeoutMs(index); return limit&&idleMs>=limit;
 }

@@ -372,8 +372,8 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 - Both final targets build with the pinned dependencies above. Waveshare reports
   812,378 bytes of sketch flash use and 33,548 bytes static RAM. T-Deck Plus
-  reports 1,341,359 bytes of sketch flash use and 57,192 bytes static RAM.
-- Host suite: **132 tests, 39,607 assertions, all passed**. Targeted coverage now
+  reports 1,341,371 bytes of sketch flash use and 57,192 bytes static RAM.
+- Host suite: **133 tests, 39,610 assertions, all passed**. Targeted coverage now
   proves Set Clock Only does not progress the pet; manual confirmed catch-up and
   GPS/Wi-Fi authoritative delivery advance age, level/evolution readiness, needs,
   and existing daily state through `syncClock()`; and each absolute catch-up can
@@ -405,12 +405,12 @@ Final firmware results:
 | Target | Compile | Application `.bin` bytes | Static RAM reported |
 |---|---|---:|---:|
 | Waveshare | PASS | 812,528 | 33,548 |
-| T-Deck Plus | PASS | 1,341,504 | 57,192 |
+| T-Deck Plus | PASS | 1,341,520 | 57,192 |
 
 T-Deck application SHA-256:
-`e6fe200f221cf051436ce63e9dc19911f83081a4625ce85a7ad02240b5768d0c`.
+`0446683e14ac9358984b4eb85562554f73a2522b9c36bd9527d776917fb4aecb`.
 Waveshare application SHA-256:
-`fdd093771ce8678a7fe6132d59c718370d555de98604fbebcfcdb30a1c323346`.
+`f0a50c8579aa472db7a78f72b8f201be3f4769968eae3c31b78c36f28c20de03`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.

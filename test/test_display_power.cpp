@@ -21,3 +21,9 @@ TEST(display_power, dim_precedes_timeout_and_never_stays_on) {
   CHECK(!TpDisplay::shouldDim(99999999,5));
   CHECK(!TpDisplay::shouldTurnOff(99999999,5));
 }
+
+TEST(display_power, newer_interaction_stamp_cannot_wrap_into_an_immediate_timeout) {
+  CHECK_EQ(TpDisplay::idleMillis(1000,1002),0U);
+  CHECK(!TpDisplay::shouldTurnOff(TpDisplay::idleMillis(1000,1002),0));
+  CHECK_EQ(TpDisplay::idleMillis(5,0xFFFFFFF0UL),21U); // real millis rollover
+}
