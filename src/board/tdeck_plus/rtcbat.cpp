@@ -16,6 +16,7 @@
 constexpr uint32_t MIN_VALID_EPOCH=1704067200UL,MAX_VALID_EPOCH=4102444799UL;
 constexpr uint32_t GPS_GRACE_MS=12000,WIFI_WAIT_MS=12000,NTP_WAIT_MS=15000;
 constexpr uint32_t MANUAL_GPS_MS=15000,PERSIST_MS=5UL*60*1000;
+constexpr uint32_t GPS_PRIMARY_BAUD=38400,GPS_FALLBACK_BAUD=9600,GPS_PROBE_MS=2500,GPS_STARTUP_MS=250;
 constexpr int MAX_SCAN_RESULTS=6;
 enum WifiAction:uint8_t { WIFI_NONE=0,WIFI_AUTO_NTP,WIFI_MANUAL_NTP,WIFI_CONNECT_SAVED,WIFI_CONNECT_CANDIDATE };
 enum WifiCommand:uint8_t { WIFI_CMD_NONE=0,WIFI_CMD_ENABLE,WIFI_CMD_DISABLE,WIFI_CMD_SCAN,WIFI_CMD_CONNECT_SAVED,WIFI_CMD_CONNECT_CANDIDATE,WIFI_CMD_FORGET,WIFI_CMD_SYNC };
@@ -38,6 +39,10 @@ static char feedback[28]={0}; static uint32_t feedbackUntil=0;
 static char scanSsid[MAX_SCAN_RESULTS][33]={{0}}; static int scanRssi[MAX_SCAN_RESULTS]={0},scanCount=0;
 static HardwareSerial gps(1);
 static char nmea[112]; static uint8_t nmeaLen=0;
+enum NmeaType:uint8_t { NMEA_OTHER=0,NMEA_RMC,NMEA_ZDA,NMEA_GGA,NMEA_GLL,NMEA_GSA,NMEA_GSV,NMEA_VTG,NMEA_TXT };
+static uint32_t gpsBaud=GPS_PRIMARY_BAUD,gpsBaudAt=0,gpsReadyAt=0,gpsDiagAt=0,gpsBytesWindow=0,gpsBytesTotal=0;
+static uint32_t gpsValidChecksum=0,gpsValidRmc=0,gpsValidZda=0,gpsLastParsedUtc=0;
+static uint16_t gpsTypes=0; static uint8_t gpsProbe=0,gpsUbxState=0; static bool gpsUbxSeen=false;
 static constexpr uint32_t WIFI_BREADCRUMB_MAGIC=0x54505749UL;
 RTC_NOINIT_ATTR static uint32_t wifiBreadcrumbMagic;
 RTC_NOINIT_ATTR static uint32_t wifiBreadcrumbAction;
@@ -117,34 +122,73 @@ static int hexNibble(char c) {
   if (c>='0'&&c<='9') return c-'0'; if (c>='A'&&c<='F') return c-'A'+10;
   if (c>='a'&&c<='f') return c-'a'+10; return -1;
 }
+static NmeaType sentenceType(const char *token) {
+  size_t len=strlen(token); if (len<4) return NMEA_OTHER; const char *kind=token+len-3;
+  if (!strcmp(kind,"RMC")) return NMEA_RMC; if (!strcmp(kind,"ZDA")) return NMEA_ZDA;
+  if (!strcmp(kind,"GGA")) return NMEA_GGA; if (!strcmp(kind,"GLL")) return NMEA_GLL;
+  if (!strcmp(kind,"GSA")) return NMEA_GSA; if (!strcmp(kind,"GSV")) return NMEA_GSV;
+  if (!strcmp(kind,"VTG")) return NMEA_VTG; if (!strcmp(kind,"TXT")) return NMEA_TXT;
+  return NMEA_OTHER;
+}
 static bool parseNmea(char *line,uint32_t &utc) {
   char *star=strchr(line,'*'); if (line[0]!='$'||!star||strlen(star)<3) return false;
   uint8_t sum=0; for (char *p=line+1;p<star;++p) sum^=(uint8_t)*p;
   int hi=hexNibble(star[1]),lo=hexNibble(star[2]);
   if (hi<0||lo<0||sum!=(uint8_t)((hi<<4)|lo)) return false;
+  ++gpsValidChecksum;
   *star=0; char *fields[16]; int count=0; fields[count++]=line;
   for (char *p=line;*p&&count<16;++p) if (*p==',') { *p=0; fields[count++]=p+1; }
+  NmeaType type=sentenceType(fields[0]); gpsTypes|=(uint16_t)(1u<<type);
   int hh,mm,ss;
-  if (count>=10&&(!strcmp(fields[0],"$GPRMC")||!strcmp(fields[0],"$GNRMC"))) {
+  if (type==NMEA_RMC&&count>=10) {
     if (!parseTime(fields[1],hh,mm,ss)||strlen(fields[9])<6) return false;
     for (int i=0;i<6;++i) if (fields[9][i]<'0'||fields[9][i]>'9') return false;
     int day=(fields[9][0]-'0')*10+fields[9][1]-'0',mon=(fields[9][2]-'0')*10+fields[9][3]-'0';
     int year=2000+(fields[9][4]-'0')*10+fields[9][5]-'0';
-    return makeUtc(year,mon,day,hh,mm,ss,utc);
+    bool ok=makeUtc(year,mon,day,hh,mm,ss,utc); if (ok) { ++gpsValidRmc; gpsLastParsedUtc=utc; } return ok;
   }
-  if (count>=5&&(!strcmp(fields[0],"$GPZDA")||!strcmp(fields[0],"$GNZDA"))) {
+  if (type==NMEA_ZDA&&count>=5) {
     if (!parseTime(fields[1],hh,mm,ss)) return false;
-    return makeUtc(atoi(fields[4]),atoi(fields[3]),atoi(fields[2]),hh,mm,ss,utc);
+    bool ok=makeUtc(atoi(fields[4]),atoi(fields[3]),atoi(fields[2]),hh,mm,ss,utc); if (ok) { ++gpsValidZda; gpsLastParsedUtc=utc; } return ok;
   }
   return false;
 }
+static void startGps(uint32_t baud,const char *reason) {
+  gps.end(); gps.begin(baud,SERIAL_8N1,TDeckPins::gpsRx,TDeckPins::gpsTx);
+  gps.write((uint8_t)0xFF); // wake edge used by working M10 integrations after backup mode
+  gpsBaud=baud; gpsBaudAt=millis(); gpsReadyAt=gpsBaudAt+GPS_STARTUP_MS; nmeaLen=0;
+  Serial.printf("GPS UART initialized uart=1 rx=%d tx=%d baud=%lu wake=FF reason=%s startup_ms=%lu\n",
+                TDeckPins::gpsRx,TDeckPins::gpsTx,(unsigned long)baud,reason,(unsigned long)GPS_STARTUP_MS);
+}
+static void gpsDiagnostics(uint32_t now) {
+  if (gpsDiagAt&&now-gpsDiagAt<1000) return;
+  uint32_t interval=gpsDiagAt?now-gpsDiagAt:1000,bps=interval?gpsBytesWindow*1000/interval:gpsBytesWindow;
+  char types[44]={0}; const char *names[]={"OTHER","RMC","ZDA","GGA","GLL","GSA","GSV","VTG","TXT"};
+  for (unsigned i=0;i<sizeof(names)/sizeof(names[0]);++i) if (gpsTypes&(1u<<i)) {
+    if (types[0]) strncat(types,"/",sizeof(types)-strlen(types)-1); strncat(types,names[i],sizeof(types)-strlen(types)-1);
+  }
+  Serial.printf("GPS diag baud=%lu bytes_s=%lu bytes_total=%lu types=%s checksum_ok=%lu rmc_ok=%lu zda_ok=%lu parsed_utc=%lu ubx=%d\n",
+                (unsigned long)gpsBaud,(unsigned long)bps,(unsigned long)gpsBytesTotal,types[0]?types:"none",
+                (unsigned long)gpsValidChecksum,(unsigned long)gpsValidRmc,(unsigned long)gpsValidZda,
+                (unsigned long)gpsLastParsedUtc,gpsUbxSeen?1:0);
+  gpsBytesWindow=0; gpsTypes=0; gpsDiagAt=now;
+}
 static bool pollGps(uint32_t &utc) {
+  uint32_t now=millis(); if ((int32_t)(now-gpsReadyAt)<0) return false;
+  bool parsed=false;
   while (gps.available()) {
-    char c=(char)gps.read(); gpsSeen=true;
-    if (c=='\n') { nmea[nmeaLen]=0; bool ok=parseNmea(nmea,utc); nmeaLen=0; if (ok) return true; }
+    uint8_t raw=(uint8_t)gps.read(); char c=(char)raw; gpsSeen=true; ++gpsBytesWindow; ++gpsBytesTotal;
+    if (gpsUbxState==0) gpsUbxState=raw==0xB5?1:0;
+    else { if (raw==0x62) gpsUbxSeen=true; gpsUbxState=0; }
+    if (c=='\n') { nmea[nmeaLen]=0; if (parseNmea(nmea,utc)) parsed=true; nmeaLen=0; }
     else if (c!='\r') { if (nmeaLen<sizeof(nmea)-1) nmea[nmeaLen++]=c; else nmeaLen=0; }
   }
-  return false;
+  gpsDiagnostics(now);
+  if (!gpsValidChecksum&&now-gpsBaudAt>=GPS_PROBE_MS) {
+    if (gpsProbe==0) { gpsProbe=1; startGps(GPS_FALLBACK_BAUD,"probe-fallback"); }
+    else if (gpsProbe==1) { gpsProbe=2; startGps(GPS_PRIMARY_BAUD,"probe-primary-lock"); }
+  }
+  return parsed;
 }
 static void onNtpSync(timeval *) { ntpSynced=true; }
 static bool beginWifi(WifiAction action,const char *ssid,const char *pass) {
@@ -258,6 +302,7 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
   sourceUtc=utc; sourceAtMs=now; savedUtc=utc; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
   if (wifiAction!=WIFI_NONE) { radioOff("time-synced"); clearWifiAction("ntp-sync"); }
   setFeedback(source==RTC_TIME_GPS?"GPS TIME OK":"WIFI TIME OK");
+  if (source==RTC_TIME_GPS) Serial.printf("GPS authoritative accepted=1 utc=%lu catchup=%d\n",(unsigned long)utc,lastSyncCatchupAllowed?1:0);
   Serial.printf("CLOCK mapping current_wall=%lu synced_wall=%lu offset=%ld\n",(unsigned long)currentWall,(unsigned long)wallEpoch,(long)wallOffset);
   return true;
 }
@@ -274,7 +319,7 @@ bool rtcBegin(uint32_t petSavedWall) {
   if (restore) setSystem(restore);
   bootAtMs=millis();
   if (mapped) { sourceUtc=savedUtc; sourceAtMs=bootAtMs; }
-  syncState=RTC_SYNC_GPS_SEARCHING; gps.begin(9600,SERIAL_8N1,TDeckPins::gpsRx,TDeckPins::gpsTx);
+  syncState=RTC_SYNC_GPS_SEARCHING; startGps(GPS_PRIMARY_BAUD,"tdeck-plus-default");
   Serial.printf("CLOCK boot saved_wall=%lu saved_utc=%lu offset=%ld mapped=%d wifi=%s\n",
                 (unsigned long)savedWall,(unsigned long)savedUtc,(long)wallOffset,mapped?1:0,!wifiOn?"off":wifiConfigured?"configured":"not-configured");
   Serial.printf("RESET reason=%d previous_wifi_action=%s nvs=%s\n",(int)esp_reset_reason(),
