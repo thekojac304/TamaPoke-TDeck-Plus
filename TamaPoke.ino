@@ -385,7 +385,13 @@ void updateBrightness(uint32_t now) {
   dimStage = (idle > 300000) ? 2 : (idle > 90000) ? 1 : 0;
 #endif
   uint8_t target = pet.sleeping ? 25 : (usbPresent() ? 180 : 145);
-  if (dimStage == 1) target = pet.sleeping ? 10 : 60;
+  if (dimStage == 1) {
+#if TAMAPOKE_TDECK_PLUS
+    target = TpDisplay::dimBrightness(target);
+#else
+    target = pet.sleeping ? 10 : 60;
+#endif
+  }
   else if (dimStage == 2) target = 8;
   if (screenOff) target = 0;
   static uint8_t current = 255;

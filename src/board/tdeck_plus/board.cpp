@@ -31,6 +31,7 @@ Arduino_Canvas *canvas() {
 void brightness(uint8_t value) {
  static uint8_t level = 0;
  uint8_t target = value ? 1 + (uint16_t(value) * 15 / 255) : 0;
+ Serial.printf("DISPLAY brightness value=%u pulse_step=%u\n",value,target);
  if (!target) {
   digitalWrite(backlight, LOW); delay(3); level = 0; return;
  }

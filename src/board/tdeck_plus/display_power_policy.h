@@ -21,4 +21,10 @@ inline bool shouldTurnOff(uint32_t idleMs,uint8_t index) {
 inline bool shouldDim(uint32_t idleMs,uint8_t index) {
   uint32_t limit=timeoutMs(index); return limit&&idleMs<limit&&limit-idleMs<=15000UL;
 }
+// The pulse backlight has only 16 steps. About one-sixth of the selected awake
+// level lands on step 2 for both normal T-Deck operating levels: conspicuously
+// darker than the former value 60 (step 4), but still readable indoors.
+inline uint8_t dimBrightness(uint8_t awakeBrightness) {
+  uint8_t dim=awakeBrightness/6; return dim<4?4:dim;
+}
 }

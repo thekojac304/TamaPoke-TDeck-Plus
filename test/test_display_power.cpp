@@ -22,6 +22,12 @@ TEST(display_power, dim_precedes_timeout_and_never_stays_on) {
   CHECK(!TpDisplay::shouldTurnOff(99999999,5));
 }
 
+TEST(display_power, tdeck_dim_level_is_derived_and_visibly_reduced) {
+  CHECK_EQ(TpDisplay::dimBrightness(145),24);
+  CHECK_EQ(TpDisplay::dimBrightness(180),30);
+  CHECK_EQ(TpDisplay::dimBrightness(25),4);
+}
+
 TEST(display_power, newer_interaction_stamp_cannot_wrap_into_an_immediate_timeout) {
   CHECK_EQ(TpDisplay::idleMillis(1000,1002),0U);
   CHECK(!TpDisplay::shouldTurnOff(TpDisplay::idleMillis(1000,1002),0));
