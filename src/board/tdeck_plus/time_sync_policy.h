@@ -6,6 +6,10 @@ constexpr uint32_t MIN_EPOCH=1704067200UL,MAX_EPOCH=4102444799UL;
 constexpr uint32_t MAX_DELTA=10UL*366*86400;
 enum Source:uint8_t { LOCAL=0,GPS,WIFI,MANUAL };
 
+inline const char *sourceLabel(Source source) {
+  return source==GPS?"TIME: GPS":source==WIFI?"TIME: WIFI":source==MANUAL?"TIME: MANUAL":"TIME: LOCAL";
+}
+
 inline bool validEpoch(uint32_t epoch) { return epoch>=MIN_EPOCH&&epoch<=MAX_EPOCH; }
 inline bool validDelta(uint32_t acquired,uint32_t saved) {
   return validEpoch(acquired)&&validEpoch(saved)&&acquired>=saved&&acquired-saved<=MAX_DELTA;

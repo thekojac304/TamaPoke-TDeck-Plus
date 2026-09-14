@@ -9,6 +9,13 @@ TEST(time_sync, gps_success_wins_and_source_is_visible) {
   CHECK(p.delivered);
 }
 
+TEST(time_sync, source_labels_report_the_trusted_source_not_sync_activity) {
+  CHECK_EQ(std::string(TpTime::sourceLabel(TpTime::LOCAL)),std::string("TIME: LOCAL"));
+  CHECK_EQ(std::string(TpTime::sourceLabel(TpTime::GPS)),std::string("TIME: GPS"));
+  CHECK_EQ(std::string(TpTime::sourceLabel(TpTime::WIFI)),std::string("TIME: WIFI"));
+  CHECK_EQ(std::string(TpTime::sourceLabel(TpTime::MANUAL)),std::string("TIME: MANUAL"));
+}
+
 TEST(time_sync, ntp_success_wins_when_gps_has_not_delivered) {
   TpTime::SyncPolicy p;
   CHECK(p.accept(TpTime::WIFI,1767225600UL));

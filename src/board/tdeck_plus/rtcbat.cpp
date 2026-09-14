@@ -261,11 +261,7 @@ void rtcCancelManualCatchup() { manualCatchup.cancel(); }
 RtcTimeSource rtcTimeSource() { return timeSource; }
 RtcSyncState rtcSyncState() { return syncState; }
 const char *rtcTimeStatusLabel() {
-  if (syncState==RTC_SYNC_GPS_SEARCHING) return "GPS: SEARCHING";
-  if (syncState==RTC_SYNC_WIFI_CONNECTING) return "WIFI: CONNECTING";
-  if (syncState==RTC_SYNC_NTP_WAITING) return "WIFI: SYNCING";
-  if (syncState==RTC_SYNC_FAILED&&timeSource==RTC_TIME_LOCAL) return "TIME: UNSYNCED";
-  return timeSource==RTC_TIME_GPS?"TIME: GPS":timeSource==RTC_TIME_WIFI?"TIME: WIFI":timeSource==RTC_TIME_MANUAL?"TIME: MANUAL":"TIME: LOCAL";
+  return TpTime::sourceLabel((TpTime::Source)timeSource);
 }
 const char *rtcSyncFeedback() { return feedback[0]&&(int32_t)(feedbackUntil-millis())>0?feedback:nullptr; }
 bool rtcAutomaticSyncFailed() { return policy.consumeFailurePrompt(autoFailed); }

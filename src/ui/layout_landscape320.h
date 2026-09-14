@@ -27,7 +27,7 @@ constexpr Rect nicknameField{128,38,184,34};
 constexpr Rect trainButton{52,158,216,38};
 
 // Settings landing page: time source owns a full row, separate from controls.
-constexpr Rect settingsStatus{12,34,296,26};
+constexpr Rect settingsClock{12,34,86,26}, settingsSource{106,34,202,26};
 constexpr Rect syncGps{12,68,92,36}, syncWifi{114,68,92,36}, manualTime{216,68,92,36};
 constexpr Rect soundToggle{12,112,140,36}, languageToggle{168,112,140,36};
 constexpr Rect wifiSettings{12,156,296,36}, settingsFeedback{12,200,296,24};

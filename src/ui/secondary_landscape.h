@@ -145,12 +145,13 @@ static void compactCardTap(int16_t x,int16_t y) {
 
 static void renderCompactSettings() {
   compactScreenTitle(T(S_SET_TIME));
-  gfx->fillRoundRect(Layout::settingsStatus.x,Layout::settingsStatus.y,Layout::settingsStatus.w,Layout::settingsStatus.h,6,UI_WHITE);
+  gfx->fillRoundRect(Layout::settingsClock.x,Layout::settingsClock.y,Layout::settingsClock.w,Layout::settingsClock.h,6,UI_WHITE);
+  gfx->fillRoundRect(Layout::settingsSource.x,Layout::settingsSource.y,Layout::settingsSource.w,Layout::settingsSource.h,6,UI_WHITE);
   gfx->setTextColor(rtcAuthoritative()?UI_BAR_OK:Layout::secondaryText);
-  uint32_t wall=rtcEpoch(); char status[40];
-  snprintf(status,sizeof(status),"%02lu:%02lu  %s",(unsigned long)((wall/3600)%24),
-           (unsigned long)((wall/60)%60),rtcTimeStatusLabel());
-  compactCentered(status,Layout::settingsStatus,2);
+  uint32_t wall=rtcEpoch(); char clock[8];
+  snprintf(clock,sizeof(clock),"%02lu:%02lu",(unsigned long)((wall/3600)%24),(unsigned long)((wall/60)%60));
+  compactCentered(clock,Layout::settingsClock,2);
+  compactCentered(rtcTimeStatusLabel(),Layout::settingsSource,2);
   compactButton(Layout::syncGps,"SYNC GPS",UI_WHITE);
   compactButton(Layout::syncWifi,"SYNC WIFI",UI_WHITE);
   compactButton(Layout::manualTime,"MANUAL",UI_WHITE);

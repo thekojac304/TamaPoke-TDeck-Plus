@@ -67,7 +67,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::minuteMinus); fits(Layout::minutePlus); fits(Layout::soundToggle);
   fits(Layout::languageToggle); fits(Layout::clockOnlyApply); fits(Layout::clockCatchup);
   fits(Layout::manualSource); fits(Layout::catchupInfo); fits(Layout::catchupApply); fits(Layout::catchupCancel);
-  fits(Layout::settingsStatus); fits(Layout::syncGps); fits(Layout::syncWifi);
+  fits(Layout::settingsClock); fits(Layout::settingsSource); fits(Layout::syncGps); fits(Layout::syncWifi);
   fits(Layout::manualTime); fits(Layout::wifiSettings); fits(Layout::settingsFeedback);
   fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
   fits(Layout::wifiConnect); fits(Layout::wifiForget); fits(Layout::wifiSyncTime);
@@ -89,11 +89,13 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   auto overlaps=[](const Layout::Rect &a,const Layout::Rect &b) {
     return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
   };
-  CHECK(!overlaps(Layout::settingsStatus,Layout::syncGps));
-  CHECK(!overlaps(Layout::settingsStatus,Layout::syncWifi));
-  CHECK(!overlaps(Layout::settingsStatus,Layout::manualTime));
-  CHECK(!overlaps(Layout::settingsStatus,Layout::soundToggle));
-  CHECK(!overlaps(Layout::settingsStatus,Layout::languageToggle));
+  CHECK(!overlaps(Layout::settingsClock,Layout::settingsSource));
+  CHECK(!overlaps(Layout::settingsClock,Layout::syncGps));
+  CHECK(!overlaps(Layout::settingsSource,Layout::syncGps));
+  CHECK(!overlaps(Layout::settingsSource,Layout::syncWifi));
+  CHECK(!overlaps(Layout::settingsSource,Layout::manualTime));
+  CHECK(!overlaps(Layout::settingsSource,Layout::soundToggle));
+  CHECK(!overlaps(Layout::settingsSource,Layout::languageToggle));
   CHECK(!overlaps(Layout::manualSource,Layout::clockOnlyApply));
   CHECK(!overlaps(Layout::manualSource,Layout::clockCatchup));
   CHECK(!overlaps(Layout::catchupInfo,Layout::catchupApply));
