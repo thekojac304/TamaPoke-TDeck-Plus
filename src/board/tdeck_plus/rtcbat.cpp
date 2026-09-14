@@ -424,15 +424,16 @@ bool rtcWifiConnectCandidate(const char *ssid,const char *password) {
   queueWifi(WIFI_CMD_CONNECT_CANDIDATE); setFeedback("WIFI CONNECT QUEUED"); return true;
 }
 
-static int batteryMv=0,batteryPct=-1,batteryAdcMv=0;
+static int batteryMv=0,batteryPct=-1,batteryAdcMv=0,batteryRaw=0;
 static uint32_t batteryReadAt=0,batteryLogAt=0;
 static void refreshBattery(bool force=false) {
   uint32_t now=millis();
   if (!force&&batteryReadAt&&now-batteryReadAt<10000UL) return;
   batteryReadAt=now?now:1;
-  uint32_t sum=0;
-  for (int i=0;i<8;++i) sum+=analogReadMilliVolts(TDeckPins::batteryAdc);
-  batteryAdcMv=(int)(sum/8); int sample=batteryAdcMv*2;
+  uint32_t rawSum=0,mvSum=0;
+  for (int i=0;i<8;++i) { rawSum+=analogRead(TDeckPins::batteryAdc); mvSum+=analogReadMilliVolts(TDeckPins::batteryAdc); }
+  batteryRaw=(int)(rawSum/8); batteryAdcMv=(int)(mvSum/8);
+  int sample=TpBattery::batteryMillivoltsFromAdc(batteryAdcMv);
   if (!TpBattery::validMillivolts(sample)) { batteryMv=0; batteryPct=-1; }
   else {
     batteryMv=TpBattery::smoothMillivolts(batteryMv,sample);
@@ -440,7 +441,8 @@ static void refreshBattery(bool force=false) {
   }
   if (force||!batteryLogAt||now-batteryLogAt>=60000UL) {
     batteryLogAt=now?now:1;
-    Serial.printf("BATTERY adc_mv=%d cell_mv=%d smooth_mv=%d estimated_pct=%d\n",batteryAdcMv,sample,batteryMv,batteryPct);
+    Serial.printf("BATTERY raw_adc=%d adc_mv=%d cell_mv=%d formula=adc_mv*2 smooth_mv=%d estimated_pct=%d approximate=1\n",
+                  batteryRaw,batteryAdcMv,sample,batteryMv,batteryPct);
   }
 }
 bool batBegin() {

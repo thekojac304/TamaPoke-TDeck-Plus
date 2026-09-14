@@ -6,11 +6,14 @@ namespace TpBattery {
 // are doubled. Values outside a plausible single-cell Li-ion range are absent
 // or electrically invalid, not zero-percent batteries.
 inline bool validMillivolts(int mv) { return mv>=3000&&mv<=4400; }
+inline int batteryMillivoltsFromAdc(int adcMv) { return adcMv*2; }
 inline int estimatePercent(int mv) {
+  // Meshtastic's established single-cell OCV table, interpolated between
+  // 10-percent points. It is still an estimate under load, not calibration.
   struct Point { int mv,pct; };
   static constexpr Point curve[]={
-    {3300,0},{3500,5},{3600,10},{3700,20},{3750,30},{3800,45},
-    {3850,60},{3900,70},{4000,82},{4100,92},{4200,100}
+    {3100,0},{3300,10},{3420,20},{3530,30},{3630,40},{3720,50},
+    {3800,60},{3890,70},{3990,80},{4050,90},{4190,100}
   };
   if (mv<=curve[0].mv) return 0;
   for (unsigned i=1;i<sizeof(curve)/sizeof(curve[0]);++i) if (mv<=curve[i].mv) {
