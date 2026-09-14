@@ -355,7 +355,6 @@ void handleSerial() {
     Serial.printf("rtc=%u\n", rtcEpoch());
     Serial.println("DONE");
   } else if (line == "GAL") {
-    if (Layout::compact) { Serial.println("Gallery deferred on this layout"); return; }
     galleryOpen = !galleryOpen;
     galleryDetail = 0;
     galleryDirty = true;
@@ -450,8 +449,13 @@ void handleTouch() {
   if (sackOpen) {
     if (pressed && !wasPressed) {
       lastInteract = millis();
+#if TAMAPOKE_TDECK_PLUS
+      if (Layout::sackExit.contains(x,y)) sackOpen = false;
+      else if (Layout::sackTarget.contains(x,y)) sackTap();
+#else
       if (y < 72) sackOpen = false;  // tocar arriba = abandonar
       else sackTap();
+#endif
     }
     wasPressed = pressed;
     return;
@@ -492,7 +496,6 @@ void handleTouch() {
 void openClock();  // prototipo
 
 void onSwipeV(int dir) {
-  if (Layout::compact) { feedMenuUntil = confirmUntil = choiceKind = 0; return; }
   if (pet.awaitingStarter()) return;  // bloqueado durante la eleccion de inicial
   if (gameOpen || galleryOpen || kbOpen || sackOpen || pet.ceremony) return;
   if (clockOpen) { clockOpen = false; return; }
@@ -510,7 +513,6 @@ void onSwipeV(int dir) {
 
 // deslizar: dir +1 = hacia la derecha
 void onSwipe(int dir) {
-  if (Layout::compact) { feedMenuUntil = confirmUntil = choiceKind = 0; return; }
   if (pet.awaitingStarter()) return;  // bloqueado durante la eleccion de inicial
   if (gameOpen || kbOpen || clockOpen) return;
   if (cardOpen) {  // dentro de la ficha: cambiar entre las 4 paginas
@@ -1064,7 +1066,6 @@ void render() {
 // ---------- minijuego: toques con la pokeball ----------
 
 void startGame() {
-  if (Layout::compact) { pet.play(); return; }
   if (pet.isEgg() || pet.sleeping || pet.ceremony) return;
   gameOpen = true;
   gameOverUntil = 0;
@@ -1072,7 +1073,7 @@ void startGame() {
   gameMisses = 0;
   gameNewHi = false;
   hitTime = 0;
-  gamePetX = 233;
+  gamePetX = 233;  // coordenadas logicas 466x466 en ambos targets
   lastGameStep = millis();
   respawnBall();
 }
@@ -1088,7 +1089,7 @@ void respawnBall() {
 
 void gameTap(int16_t x, int16_t y) {
   if (gameOverUntil) return;
-  if (y < 72) {  // tocar la cabecera = abandonar sin premio
+  if (!Layout::compact && y < 72) {  // tocar la cabecera = abandonar sin premio
     gameOpen = false;
     return;
   }
@@ -1126,7 +1127,8 @@ void stepGame() {
   ballX += ballVX * k;
   ballY += ballVY * k;
   // rebote en la pared circular
-  float dx = ballX - CX, dy = ballY - CY;
+  constexpr float gameCenter = 233.0f;
+  float dx = ballX - gameCenter, dy = ballY - gameCenter;
   float d = sqrtf(dx * dx + dy * dy);
   if (d > 205) {
     float nx = dx / d, ny = dy / d;
@@ -1135,8 +1137,8 @@ void stepGame() {
       ballVX = (ballVX - 2 * dot * nx) * 0.85f;
       ballVY = (ballVY - 2 * dot * ny) * 0.85f;
     }
-    ballX = CX + nx * 205;
-    ballY = CY + ny * 205;
+    ballX = gameCenter + nx * 205;
+    ballY = gameCenter + ny * 205;
   }
   if (ballY > 384) {  // al suelo
     if (++gameMisses >= 3) {
@@ -1158,7 +1160,6 @@ void stepGame() {
 // ---------- saco de entrenamiento (entrena la fuerza) ----------
 
 void startSack() {
-  if (Layout::compact) return;
   if (pet.isEgg() || pet.sleeping || pet.ceremony) return;
   sackOpen = true;
   sackUntil = millis() + 10000;

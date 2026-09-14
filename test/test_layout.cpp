@@ -55,3 +55,30 @@ TEST(layout, all_repository_pmd_action_frames_fit_without_resampling) {
   CHECK_EQ(Layout::fitScale(72,128,5),1); // Gyarados
   CHECK_EQ(Layout::fitScale(32,32,5),5);
 }
+
+TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
+  auto fits=[](const Layout::Rect &r) {
+    CHECK(r.x>=0); CHECK(r.y>=0); CHECK(r.w>0); CHECK(r.h>0);
+    CHECK(r.x+r.w<=320); CHECK(r.y+r.h<=240);
+  };
+  fits(Layout::homeProfile); fits(Layout::homeDex); fits(Layout::homeSettings);
+  fits(Layout::screenBack); fits(Layout::cardHome); fits(Layout::nicknameField);
+  fits(Layout::trainButton); fits(Layout::hourMinus); fits(Layout::hourPlus);
+  fits(Layout::minuteMinus); fits(Layout::minutePlus); fits(Layout::soundToggle);
+  fits(Layout::languageToggle); fits(Layout::clockApply);
+  fits(Layout::galleryPrev); fits(Layout::galleryNext); fits(Layout::galleryExit);
+  fits(Layout::detailSprite); fits(Layout::detailInfo); fits(Layout::detailBack);
+  fits(Layout::sackExit); fits(Layout::sackTarget); fits(Layout::gameViewport);
+  fits(Layout::gameHud); fits(Layout::gameExit);
+  for (int i=0;i<4;++i) fits(Layout::cardTabs[i]);
+  for (int i=0;i<30;++i) {
+    auto key=Layout::keyboardKey(i); fits(key);
+    CHECK(Layout::keyboardArea.contains(key.x,key.y));
+    CHECK(Layout::keyboardArea.contains(key.x+key.w-1,key.y+key.h-1));
+  }
+  for (int i=0;i<16;++i) {
+    auto cell=Layout::galleryCell(i); fits(cell);
+    CHECK(Layout::galleryGrid.contains(cell.x,cell.y));
+    CHECK(Layout::galleryGrid.contains(cell.x+cell.w-1,cell.y+cell.h-1));
+  }
+}

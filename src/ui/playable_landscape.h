@@ -23,6 +23,7 @@ static void compactButton(const Layout::Rect &r, const char *label, uint16_t col
   uint8_t size = textW(label,2) <= r.w-12 ? 2 : 1;
   compactText(label,r.x+6,r.y+(r.h-8*size)/2,r.w-12,size);
 }
+#include "secondary_landscape.h"
 #include "actions_landscape.h"
 void renderCompact() {
   if (pet.awaitingStarter()) {
@@ -38,6 +39,12 @@ void renderCompact() {
     }
     gfx->flush(); return;
   }
+  if (galleryOpen) { renderCompactGallery(); return; }
+  if (gameOpen) { renderCompactGame(); return; }
+  if (sackOpen) { renderCompactSack(); return; }
+  if (kbOpen) { renderCompactKeyboard(); return; }
+  if (clockOpen) { renderCompactClock(); return; }
+  if (cardOpen) { renderCompactCard(); return; }
   int hour=sceneHour(); gNight=pet.sleeping || hour<6 || hour>=20;
   gfx->fillScreen(gNight ? UI_BG_NIGHT : UI_BG_DAY);
   compactFill(Layout::scene,gNight ? C565(0x20,0x30,0x48) : C565(0xBB,0xDF,0xE2));
@@ -61,7 +68,10 @@ void renderCompact() {
   char title[80];
   if (pet.isEgg()) snprintf(title,sizeof(title),"%s",T(S_EGG_HDR));
   else snprintf(title,sizeof(title),T(S_NAME_FMT),pet.shiny ? "*" : "",pet.nick[0] ? pet.nick : dexName(pet.speciesId),pet.level());
-  compactText(title,6,5,308,2);
+  compactText(title,44,5,176,2);
+  compactButton(Layout::homeProfile,"i",UI_WHITE);
+  compactButton(Layout::homeDex,"#",UI_WHITE);
+  compactButton(Layout::homeSettings,"...",UI_WHITE);
   if (pet.isEgg()) {
     compactText(eggMsg(),Layout::eggMessage.x,Layout::eggMessage.y,Layout::eggMessage.w,1);
     compactText(pet.eggRarity() == R_LEGENDARIO ? T(S_EGG_LEGEND) : pet.eggRarity() >= R_RARO ? T(S_EGG_RARE) : "",Layout::eggDetails.x,Layout::eggDetails.y,Layout::eggDetails.w);
