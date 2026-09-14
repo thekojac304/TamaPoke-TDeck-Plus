@@ -174,7 +174,7 @@ void setup() {
   thumbs.load();
 
   // reloj real: aplica el tiempo que estuvo apagado
-  rtcBegin();
+  rtcBegin(pet.savedEpoch());
   batBegin();
   pwrSetup();
   uint32_t e = rtcEpoch();
@@ -271,8 +271,17 @@ void loop() {
   if (now - lastClock > 30000) {
     lastClock = now;
     uint32_t e = rtcEpoch();
-    if (e) pet.lastSeenEpoch = e;
+    if (e) {
+      pet.lastSeenEpoch = e;
+      rtcPersistReference(e);
+    }
   }
+
+  // GPS is continuously parsed without blocking. Stored Wi-Fi credentials are
+  // tried for NTP only after the GPS grace period. syncClock receives an
+  // absolute wall epoch, so the same offline interval cannot be applied twice.
+  uint32_t syncedWall=0;
+  if (rtcPollAuthoritative(syncedWall)) pet.syncClock(syncedWall);
 
   // latido de salud cada 5 min (para el soak test; se descarta si no hay monitor)
   static uint32_t lastHealth = 0;
@@ -1419,6 +1428,7 @@ void applyClock() {
   uint32_t base = pet.lastSeenEpoch ? pet.lastSeenEpoch : rtcEpoch();
   uint32_t e = (base / 86400) * 86400 + (uint32_t)clockH * 3600 + (uint32_t)clockM * 60;
   rtcSetEpoch(e);
+  rtcManualClockSet(e);
   pet.setClock(e);
   clockOpen = false;
 }

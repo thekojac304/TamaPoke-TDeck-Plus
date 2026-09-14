@@ -2,9 +2,15 @@
 #include <Arduino.h>
 
 // Board clock: PCF85063 on Waveshare; saved-time-seeded system clock on T-Deck.
-bool rtcBegin();
+bool rtcBegin(uint32_t savedWallEpoch = 0);
 uint32_t rtcEpoch();             // segundos unix; 0 si el RTC no es valido
 void rtcSetEpoch(uint32_t e);
+// Non-blocking external-time support. Waveshare's battery RTC needs no polling.
+// On T-Deck, a returned wall epoch is an absolute value suitable for syncClock().
+bool rtcPollAuthoritative(uint32_t &wallEpoch);
+bool rtcAuthoritative();
+void rtcPersistReference(uint32_t wallEpoch);
+void rtcManualClockSet(uint32_t wallEpoch);
 
 // PMU AXP2101: estado de la bateria
 bool batBegin();

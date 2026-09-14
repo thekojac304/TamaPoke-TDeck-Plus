@@ -141,18 +141,27 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 ## Temporary limitations
 
-- No powered-off elapsed time is invented. Every boot seeds system time from the
-  later of the saved epoch and the existing initial seed, then time advances
-  while powered. Even a warm reset conservatively restores that saved reference.
-  Unsaved seconds can be lost. The local wall-clock convention and serial
-  `TIME <epoch>` correction command remain; there is no GPS/NTP clock or timezone
-  redesign.
+- The ESP32 system clock is the active game clock. A non-blocking GPS parser first
+  accepts checksum-valid RMC or ZDA UTC (date/time does not require a positional
+  fix). After 45 seconds, NTP is tried only when the ESP32 already has stored
+  station credentials; connection and synchronization have bounded timeouts.
+  Manual Set Time remains available and the settings screen shows `TIME: LOCAL`
+  until an authoritative source has been accepted.
+- The game still displays its historical local-wall-clock-shaped epoch. The
+  separate `tp-clock` NVS namespace pairs that wall value with authoritative UTC
+  and an offset. The first sync of a legacy save preserves its displayed clock
+  and deliberately does not guess whether the old difference was timezone or
+  powered-off time. Later boots use the paired UTC references for one absolute
+  `syncClock()` call; negative and over-ten-year source jumps are not applied,
+  while the existing game logic retains its two-week progression cap.
 - The CPU keeps running while dimmed. No deep sleep or physical power-key
   semantics are emulated. Battery percentage, voltage, charging and USB detection
   are unavailable. Brightness uses the official 16-level pulse scheme.
-- No audio backend, physical keyboard, trackball, GPS, LoRa, BLE, networking or
-  launcher work. The on-screen sound preference remains usable, but the T-Deck
-  backend is intentionally silent in this pass.
+- Speaker output uses the existing synthesized 16 kHz PCM effects on I2S BCK 7,
+  WS 5 and DOUT 6. Effect bursts end with zero samples and release I2S for idle
+  silence; initialization failure degrades to silent operation. There is no
+  microphone support. Physical keyboard, trackball, LoRa, BLE, general networking
+  and launcher work remain out of scope.
 - Long labels are clipped to their reserved rectangles when a translation cannot
   fit at the smallest supported font. Ceremony/evolution effects remain simplified
   on the compact scene; the engine's timing and outcomes are retained.
@@ -181,10 +190,16 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
    a known asset PUT while rendering. Check for corruption, failed reads and
    clipping. Repeat without SD to verify flash sprites and clear missing-art text.
 7. Perform a care action that saves, reset, and verify state. Let deferred saves
-   flush while dimmed, then use the physical switch and verify again. Confirm that
-   clock time advances while running and does not invent time while fully off.
+   flush while dimmed, then use the physical switch and verify again.
 8. Repeat cold boot on battery, with/without USB monitor and with/without SD.
    Finally smoke-test the original Waveshare binary on its own board.
+9. With Sound on, verify the startup jingle, food/care sounds, both minigames,
+   rapid repeated effects and sleep gating. Toggle Sound off during an effect and
+   confirm playback stops; leave the device idle and listen for clicks or hiss.
+10. Boot outdoors and confirm a `CLOCK authoritative=GPS` log can appear before a
+   position fix. Power off for a measured interval, reboot, and verify exactly one
+   catch-up. Repeat indoors with pre-existing Wi-Fi credentials for NTP, then with
+   no credentials and confirm `TIME: LOCAL` plus manual Set Time remain usable.
 
 ### Secondary UI physical checklist
 
@@ -245,13 +260,13 @@ Final firmware results:
 
 | Target | Compile | Application binary bytes | Static RAM reported |
 |---|---|---:|---:|
-| Waveshare | PASS | 812,192 | 33,548 |
-| T-Deck Plus | PASS | 713,296 | 31,468 |
+| Waveshare | PASS | 812,098 | 33,548 |
+| T-Deck Plus | PASS | 1,319,031 | 56,296 |
 
 T-Deck application SHA-256:
-`82f85dcea5b2a55ead3d52294d08b6c37926f142619a8f08c8de66798c01200e`.
+`5b0cfdbf12b06cf7ca521d6b01e71e0041df75ee19ba37a46d77470a9e7b83ff`.
 Waveshare application SHA-256:
-`c34465f42e5d9fcb9b954d4d4b116aadaffb6347d85e91893fbc382517f54bae`.
+`80f2b2e600811569f98bc6ea09c2ebca8f960d644762a4aae4203d4160c0f58f`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.

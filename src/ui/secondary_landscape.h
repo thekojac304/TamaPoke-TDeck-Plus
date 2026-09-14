@@ -155,6 +155,8 @@ static void renderCompactClock() {
   compactButton(Layout::languageToggle,lang,UI_WHITE);
   compactButton(Layout::clockApply,"OK",UI_BAR_OK);
   char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
+  gfx->setTextColor(rtcAuthoritative()?UI_BAR_OK:Layout::secondaryText);
+  compactText(rtcAuthoritative()?"TIME: SYNC":"TIME: LOCAL",12,220,120,1);
   gfx->setTextColor(Layout::secondaryText); compactText(ver,276,220,40,1);
   gfx->flush();
 }

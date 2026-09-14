@@ -12,11 +12,15 @@ static XPowersPMU pmu;
 static bool rtcOk = false;
 static bool pmuOk = false;
 
-bool rtcBegin() {
+bool rtcBegin(uint32_t) {
   rtcOk = rtc.begin(Wire, IIC_SDA, IIC_SCL);
   if (!rtcOk) Serial.println("PCF85063 no detectado");
   return rtcOk;
 }
+bool rtcPollAuthoritative(uint32_t &) { return false; }
+bool rtcAuthoritative() { return rtcOk; }
+void rtcPersistReference(uint32_t) {}
+void rtcManualClockSet(uint32_t) {}
 
 uint32_t rtcEpoch() {
   if (!rtcOk) return 0;

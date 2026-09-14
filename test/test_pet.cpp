@@ -880,6 +880,27 @@ TEST(offline, sin_reloj_no_se_aplica_nada) {
   CHECK_EQ(p.fullness, (uint8_t)80);
 }
 
+TEST(offline, reloj_hacia_atras_no_aplica_tiempo_negativo) {
+  Pet p;
+  makePet(p, 4);
+  setStats(p, 80, 80, 80, 100);
+  p.setClock(1000u * 86400);
+  p.syncClock(999u * 86400);
+  CHECK_EQ(p.ageMinutes, (uint32_t)0);
+  CHECK_EQ(p.fullness, (uint8_t)80);
+}
+
+TEST(offline, una_referencia_absoluta_no_se_aplica_dos_veces) {
+  Pet p;
+  makePet(p, 4);
+  p.setClock(1000u * 86400);
+  uint32_t now=1000u * 86400+10u * 60;
+  p.syncClock(now);
+  CHECK_EQ(p.ageMinutes, (uint32_t)10);
+  p.syncClock(now);
+  CHECK_EQ(p.ageMinutes, (uint32_t)10);
+}
+
 // ---------------------------------------------------------------- guardado
 TEST(save, el_estado_sobrevive_a_un_reinicio) {
   Pet a;
