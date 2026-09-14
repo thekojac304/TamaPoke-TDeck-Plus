@@ -901,6 +901,16 @@ TEST(offline, una_referencia_absoluta_no_se_aplica_dos_veces) {
   CHECK_EQ(p.ageMinutes, (uint32_t)10);
 }
 
+TEST(offline, ajuste_manual_no_aplica_progresion) {
+  Pet p;
+  makePet(p,4);
+  p.setClock(1000u*86400);
+  uint32_t age=p.ageMinutes;
+  p.setClock(1000u*86400+12*3600);
+  CHECK_EQ(p.ageMinutes,age);
+  CHECK_EQ(p.lastCatchupMinutes,0U);
+}
+
 // ---------------------------------------------------------------- guardado
 TEST(save, el_estado_sobrevive_a_un_reinicio) {
   Pet a;

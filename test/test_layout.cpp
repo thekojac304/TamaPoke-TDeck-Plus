@@ -66,6 +66,10 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::trainButton); fits(Layout::hourMinus); fits(Layout::hourPlus);
   fits(Layout::minuteMinus); fits(Layout::minutePlus); fits(Layout::soundToggle);
   fits(Layout::languageToggle); fits(Layout::clockApply);
+  fits(Layout::settingsStatus); fits(Layout::syncGps); fits(Layout::syncWifi);
+  fits(Layout::manualTime); fits(Layout::wifiSettings); fits(Layout::settingsFeedback);
+  fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
+  fits(Layout::wifiConnect); fits(Layout::wifiForget); fits(Layout::wifiSyncTime);
   fits(Layout::galleryPrev); fits(Layout::galleryNext); fits(Layout::galleryExit);
   fits(Layout::detailSprite); fits(Layout::detailInfo); fits(Layout::detailBack);
   fits(Layout::sackExit); fits(Layout::sackTarget); fits(Layout::gameViewport);
@@ -81,4 +85,13 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
     CHECK(Layout::galleryGrid.contains(cell.x,cell.y));
     CHECK(Layout::galleryGrid.contains(cell.x+cell.w-1,cell.y+cell.h-1));
   }
+  auto overlaps=[](const Layout::Rect &a,const Layout::Rect &b) {
+    return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
+  };
+  CHECK(!overlaps(Layout::settingsStatus,Layout::syncGps));
+  CHECK(!overlaps(Layout::settingsStatus,Layout::syncWifi));
+  CHECK(!overlaps(Layout::settingsStatus,Layout::manualTime));
+  CHECK(!overlaps(Layout::settingsStatus,Layout::soundToggle));
+  CHECK(!overlaps(Layout::settingsStatus,Layout::languageToggle));
+  CHECK(!overlaps(Layout::settingsStatus,Layout::clockApply));
 }

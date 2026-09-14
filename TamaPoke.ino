@@ -14,6 +14,7 @@
 #include "Arduino_GFX_Library.h"
 #include "src/board/board.h"
 #include "src/ui/layout.h"
+#include "src/ui/time_ui.h"
 #include <U8g2lib.h>  // fuentes CJK (japones); ver applyLangFont()
 #include "pin_config.h"
 #include "species.h"
@@ -67,6 +68,13 @@ uint8_t nameLen = 0;
 uint8_t cardPage = 0;         // 0 perfil, 1 stats+medallas
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
 int clockH = 12, clockM = 0;  // hora en edicion
+#if TAMAPOKE_TDECK_PLUS
+uint8_t clockPage = 0;        // 0 settings, 1 manual, 2 Wi-Fi, 3 networks, 4 password
+bool timePromptOpen = false, timePromptShown = false;
+char wifiSelectedSsid[33] = "", wifiPassword[65] = "";
+uint8_t wifiPasswordLen = 0;
+uint8_t wifiPasswordMode = 0; // lower, upper, symbols
+#endif
 
 // escena de bano: espuma sobre el bicho y limpieza al reventar
 uint32_t bathUntil = 0;
@@ -281,7 +289,25 @@ void loop() {
   // tried for NTP only after the GPS grace period. syncClock receives an
   // absolute wall epoch, so the same offline interval cannot be applied twice.
   uint32_t syncedWall=0;
-  if (rtcPollAuthoritative(syncedWall)) pet.syncClock(syncedWall);
+  if (rtcPollAuthoritative(syncedWall)) {
+#if TAMAPOKE_TDECK_PLUS
+    timePromptOpen=false;
+#endif
+    uint32_t preSync=pet.lastSeenEpoch;
+    if (rtcLastSyncAllowsCatchup()) pet.syncClock(syncedWall);
+    else pet.setClock(syncedWall);
+    if (clockOpen) {
+      timeFieldsFromEpoch(syncedWall,clockH,clockM);
+    }
+    Serial.printf("CLOCK game pre_sync=%lu post_sync=%lu offline_applied=%d catchup_minutes=%lu\n",
+                  (unsigned long)preSync,(unsigned long)pet.lastSeenEpoch,
+                  pet.lastCatchupMinutes?1:0,(unsigned long)pet.lastCatchupMinutes);
+  }
+#if TAMAPOKE_TDECK_PLUS
+  if (rtcAutomaticSyncFailed()&&!timePromptShown) {
+    timePromptShown=true; timePromptOpen=true;
+  }
+#endif
 
   // latido de salud cada 5 min (para el soak test; se descarta si no hay monitor)
   static uint32_t lastHealth = 0;
@@ -1419,9 +1445,20 @@ void drawCardStat(int y, const char *label, uint16_t val, uint16_t maxBar, uint1
 
 void openClock() {
   uint32_t e = pet.lastSeenEpoch ? pet.lastSeenEpoch : rtcEpoch();
-  clockH = (e / 3600) % 24;
-  clockM = (e / 60) % 60;
+  timeFieldsFromEpoch(e,clockH,clockM);
+#if TAMAPOKE_TDECK_PLUS
+  clockPage = 0;
+#endif
   clockOpen = true;
+}
+
+void openManualClock() {
+  uint32_t e=pet.lastSeenEpoch?pet.lastSeenEpoch:rtcEpoch();
+  timeFieldsFromEpoch(e,clockH,clockM);
+#if TAMAPOKE_TDECK_PLUS
+  clockPage=1;
+#endif
+  clockOpen=true;
 }
 
 void applyClock() {
@@ -1429,7 +1466,8 @@ void applyClock() {
   uint32_t e = (base / 86400) * 86400 + (uint32_t)clockH * 3600 + (uint32_t)clockM * 60;
   rtcSetEpoch(e);
   rtcManualClockSet(e);
-  pet.setClock(e);
+  uint32_t applied=rtcEpoch();
+  pet.setClock(applied?applied:e);
   clockOpen = false;
 }
 

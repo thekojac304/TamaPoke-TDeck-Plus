@@ -1,0 +1,54 @@
+#include "framework.h"
+#include "../src/board/tdeck_plus/time_sync_policy.h"
+#include "../src/ui/time_ui.h"
+
+TEST(time_sync, gps_success_wins_and_source_is_visible) {
+  TpTime::SyncPolicy p;
+  CHECK(p.accept(TpTime::GPS,1767225600UL));
+  CHECK_EQ(p.source,TpTime::GPS);
+  CHECK(p.delivered);
+}
+
+TEST(time_sync, ntp_success_wins_when_gps_has_not_delivered) {
+  TpTime::SyncPolicy p;
+  CHECK(p.accept(TpTime::WIFI,1767225600UL));
+  CHECK_EQ(p.source,TpTime::WIFI);
+  CHECK(!p.accept(TpTime::GPS,1767225601UL));
+}
+
+TEST(time_sync, manual_fallback_does_not_fabricate_authority) {
+  TpTime::SyncPolicy p; p.setManual();
+  CHECK_EQ(p.source,TpTime::MANUAL); CHECK(!p.delivered);
+  CHECK(p.accept(TpTime::GPS,1767225600UL));
+}
+
+TEST(time_sync, offline_catchup_can_only_be_consumed_once) {
+  TpTime::SyncPolicy p; CHECK(p.accept(TpTime::GPS,1767225600UL));
+  CHECK(p.consumeCatchup()); CHECK(!p.consumeCatchup());
+}
+
+TEST(time_sync, negative_and_absurd_source_deltas_are_rejected) {
+  uint32_t saved=1767225600UL;
+  CHECK(!TpTime::validDelta(saved-1,saved));
+  CHECK(!TpTime::validDelta(saved+TpTime::MAX_DELTA+1,saved));
+  CHECK(TpTime::validDelta(saved+60,saved));
+  CHECK(!TpTime::validEpoch(1));
+}
+
+TEST(time_sync, wifi_disabled_or_unconfigured_blocks_fallback) {
+  CHECK(!TpTime::SyncPolicy::wifiFallbackAllowed(false,true));
+  CHECK(!TpTime::SyncPolicy::wifiFallbackAllowed(true,false));
+  CHECK(TpTime::SyncPolicy::wifiFallbackAllowed(true,true));
+}
+
+TEST(time_sync, failed_sync_prompt_is_consumed_once_per_boot) {
+  TpTime::SyncPolicy p;
+  CHECK(p.consumeFailurePrompt(true));
+  CHECK(!p.consumeFailurePrompt(true));
+}
+
+TEST(time_sync, open_settings_fields_refresh_from_new_wall_epoch) {
+  int hour=1,minute=2;
+  timeFieldsFromEpoch(1767269700UL,hour,minute); // 2026-01-01 12:15 UTC
+  CHECK_EQ(hour,12); CHECK_EQ(minute,15);
+}

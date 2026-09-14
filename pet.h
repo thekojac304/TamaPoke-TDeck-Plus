@@ -62,6 +62,7 @@ public:
   uint8_t careMistakes = 0;   // descuidos: cada uno retrasa la evolucion 1 nivel
   bool sleeping = false;
   uint32_t lastSeenEpoch = 0;   // ultima hora RTC vista (para progresion offline)
+  uint32_t lastCatchupMinutes = 0; // telemetry only; never persisted
   uint8_t ceremony = CER_NONE;  // despedida/escapada/liberacion en curso
   uint8_t lastEnd = CER_NONE;   // como acabo la anterior (afecta al huevo)
   uint8_t dexReg[19] = { 0 };       // pokedex de criados (bitmap 151 bits)

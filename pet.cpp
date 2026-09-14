@@ -47,11 +47,13 @@ static uint8_t dropTo(uint8_t v, uint8_t d, uint8_t fl) {
 }
 
 void Pet::setClock(uint32_t nowEpoch) {
+  lastCatchupMinutes = 0;
   lastSeenEpoch = nowEpoch;
   if (nowEpoch) save();  // persiste ya: un corte de luz no pierde la referencia
 }
 
 void Pet::syncClock(uint32_t nowEpoch) {
+  lastCatchupMinutes = 0;
   uint32_t seen = prefs.getUInt("seen", 0);
   lastSeenEpoch = nowEpoch;
   if (nowEpoch == 0) return;
@@ -61,6 +63,7 @@ void Pet::syncClock(uint32_t nowEpoch) {
     return;
   }
   if (mins > 14UL * 24 * 60) mins = 14UL * 24 * 60;  // tope: 2 semanas
+  lastCatchupMinutes = mins;
 
   for (uint32_t i = 0; i < mins; i++) {
     ageMinutes++;

@@ -1,6 +1,7 @@
 #pragma once
 // Compact touch routing; uses the existing Pet API without new game rules.
 void compactTap(int16_t x, int16_t y) {
+  if (compactTimePromptTap(x,y)) return;
   if (pet.awaitingStarter()) {
     for (int i=0;i<3;++i) if (Layout::starter[i].contains(x,y)) {
       pet.chooseStarter(STARTER_DEX[i]);

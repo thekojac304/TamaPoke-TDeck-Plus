@@ -26,6 +26,7 @@ static void compactButton(const Layout::Rect &r, const char *label, uint16_t col
 #include "secondary_landscape.h"
 #include "actions_landscape.h"
 void renderCompact() {
+  if (timePromptOpen) { renderCompactTimePrompt(); return; }
   if (pet.awaitingStarter()) {
     gfx->fillScreen(UI_BG_DAY); gfx->setTextColor(UI_INK);
     compactText(T(S_CHOOSE_STARTER),12,12,296,2);

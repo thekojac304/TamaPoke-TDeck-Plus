@@ -12,6 +12,34 @@ bool rtcAuthoritative();
 void rtcPersistReference(uint32_t wallEpoch);
 void rtcManualClockSet(uint32_t wallEpoch);
 
+enum RtcTimeSource : uint8_t { RTC_TIME_LOCAL=0, RTC_TIME_GPS, RTC_TIME_WIFI, RTC_TIME_MANUAL };
+enum RtcSyncState : uint8_t {
+  RTC_SYNC_IDLE=0, RTC_SYNC_GPS_SEARCHING, RTC_SYNC_WIFI_CONNECTING,
+  RTC_SYNC_NTP_WAITING, RTC_SYNC_FAILED
+};
+RtcTimeSource rtcTimeSource();
+RtcSyncState rtcSyncState();
+const char *rtcTimeStatusLabel();
+const char *rtcSyncFeedback();
+bool rtcAutomaticSyncFailed();
+bool rtcLastSyncAllowsCatchup();
+void rtcRequestGpsSync();
+void rtcRequestWifiSync();
+
+// Minimal T-Deck station configuration, used only for NTP fallback.
+bool rtcWifiEnabled();
+bool rtcWifiConfigured();
+const char *rtcWifiSsid();
+void rtcWifiSetEnabled(bool enabled);
+void rtcWifiForget();
+bool rtcWifiStartScan();
+bool rtcWifiScanning();
+int rtcWifiScanCount();
+const char *rtcWifiScanSsid(int index);
+int rtcWifiScanRssi(int index);
+bool rtcWifiConnectSaved();
+bool rtcWifiConnectCandidate(const char *ssid,const char *password);
+
 // PMU AXP2101: estado de la bateria
 bool batBegin();
 void pmuEnablePanel();           // enciende BLDO1 (OLED VDD 3.3V); llamar antes de gfx->begin()

@@ -28,6 +28,7 @@ void compactKeyboardTap(int16_t,int16_t) { ++routedSecondary; }
 void compactClockTap(int16_t,int16_t) { ++routedSecondary; }
 void compactCardTap(int16_t,int16_t) { ++routedSecondary; }
 void compactGameTap(int16_t,int16_t) { ++routedSecondary; }
+bool compactTimePromptTap(int16_t,int16_t) { return false; }
 #include "../src/ui/actions_landscape.h"
 void fresh(bool hatch=true) {
   mockNvsReset(); mockSetMillis(100);

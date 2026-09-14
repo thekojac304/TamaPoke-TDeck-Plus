@@ -21,6 +21,26 @@ bool rtcPollAuthoritative(uint32_t &) { return false; }
 bool rtcAuthoritative() { return rtcOk; }
 void rtcPersistReference(uint32_t) {}
 void rtcManualClockSet(uint32_t) {}
+RtcTimeSource rtcTimeSource() { return RTC_TIME_LOCAL; }
+RtcSyncState rtcSyncState() { return RTC_SYNC_IDLE; }
+const char *rtcTimeStatusLabel() { return "TIME: LOCAL"; }
+const char *rtcSyncFeedback() { return nullptr; }
+bool rtcAutomaticSyncFailed() { return false; }
+bool rtcLastSyncAllowsCatchup() { return true; }
+void rtcRequestGpsSync() {}
+void rtcRequestWifiSync() {}
+bool rtcWifiEnabled() { return false; }
+bool rtcWifiConfigured() { return false; }
+const char *rtcWifiSsid() { return ""; }
+void rtcWifiSetEnabled(bool) {}
+void rtcWifiForget() {}
+bool rtcWifiStartScan() { return false; }
+bool rtcWifiScanning() { return false; }
+int rtcWifiScanCount() { return 0; }
+const char *rtcWifiScanSsid(int) { return ""; }
+int rtcWifiScanRssi(int) { return 0; }
+bool rtcWifiConnectSaved() { return false; }
+bool rtcWifiConnectCandidate(const char *,const char *) { return false; }
 
 uint32_t rtcEpoch() {
   if (!rtcOk) return 0;

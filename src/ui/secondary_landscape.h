@@ -143,33 +143,166 @@ static void compactCardTap(int16_t x,int16_t y) {
   if (cardPage==1&&Layout::trainButton.contains(x,y)) { cardOpen=false; startSack(); }
 }
 
-static void renderCompactClock() {
+static void renderCompactSettings() {
   compactScreenTitle(T(S_SET_TIME));
+  gfx->fillRoundRect(Layout::settingsStatus.x,Layout::settingsStatus.y,Layout::settingsStatus.w,Layout::settingsStatus.h,6,UI_WHITE);
+  gfx->setTextColor(rtcAuthoritative()?UI_BAR_OK:Layout::secondaryText);
+  uint32_t wall=rtcEpoch(); char status[40];
+  snprintf(status,sizeof(status),"%02lu:%02lu  %s",(unsigned long)((wall/3600)%24),
+           (unsigned long)((wall/60)%60),rtcTimeStatusLabel());
+  compactCentered(status,Layout::settingsStatus,2);
+  compactButton(Layout::syncGps,"SYNC GPS",UI_WHITE);
+  compactButton(Layout::syncWifi,"SYNC WIFI",UI_WHITE);
+  compactButton(Layout::manualTime,"MANUAL",UI_WHITE);
+  compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
+  char lang[16]; snprintf(lang,sizeof(lang),"%s: %s >",T(S_LANG_LABEL),LANG_CODES[gLang]);
+  compactButton(Layout::languageToggle,lang,UI_WHITE);
+  char wifi[48]; snprintf(wifi,sizeof(wifi),"WIFI: %s%s",rtcWifiEnabled()?"ON ":"OFF",rtcWifiConfigured()?rtcWifiSsid():"NOT SET");
+  compactButton(Layout::wifiSettings,wifi,UI_WHITE);
+  const char *feedback=rtcSyncFeedback();
+  if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::settingsFeedback,1); }
+  char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
+  gfx->setTextColor(Layout::secondaryText); compactText(ver,276,226,40,1);
+  gfx->flush();
+}
+
+static void renderCompactManualClock() {
+  compactScreenTitle("SET MANUALLY");
   char timeText[8]; snprintf(timeText,sizeof(timeText),"%02d:%02d",clockH,clockM);
   gfx->setTextColor(UI_INK); compactText(timeText,100,40,120,4);
   compactButton(Layout::hourMinus,"-",UI_WHITE); compactButton(Layout::hourPlus,"+",UI_WHITE);
   compactButton(Layout::minuteMinus,"-",UI_WHITE); compactButton(Layout::minutePlus,"+",UI_WHITE);
   gfx->setTextColor(Layout::secondaryText); compactText(T(S_HOUR),26,134,90,1); compactText(T(S_MIN),216,134,90,1);
-  compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
-  char lang[16]; snprintf(lang,sizeof(lang),"%s: %s >",T(S_LANG_LABEL),LANG_CODES[gLang]);
-  compactButton(Layout::languageToggle,lang,UI_WHITE);
   compactButton(Layout::clockApply,"OK",UI_BAR_OK);
-  char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
-  gfx->setTextColor(rtcAuthoritative()?UI_BAR_OK:Layout::secondaryText);
-  compactText(rtcAuthoritative()?"TIME: SYNC":"TIME: LOCAL",12,220,120,1);
-  gfx->setTextColor(Layout::secondaryText); compactText(ver,276,220,40,1);
+  gfx->setTextColor(Layout::secondaryText); compactText(rtcTimeStatusLabel(),12,224,180,1);
   gfx->flush();
 }
 
+static void renderCompactWifi() {
+  compactScreenTitle("WIFI TIME");
+  compactButton(Layout::wifiToggle,rtcWifiEnabled()?"WIFI: ON":"WIFI: OFF",rtcWifiEnabled()?UI_BAR_OK:UI_WHITE);
+  char network[44]; snprintf(network,sizeof(network),"SSID: %s",rtcWifiConfigured()?rtcWifiSsid():"NOT SET");
+  compactButton(Layout::wifiNetwork,network,UI_WHITE);
+  compactButton(Layout::wifiScan,rtcWifiScanning()?"SCANNING":"SCAN",UI_WHITE);
+  compactButton(Layout::wifiConnect,"CONNECT",UI_WHITE);
+  compactButton(Layout::wifiForget,"FORGET",UI_WHITE);
+  compactButton(Layout::wifiSyncTime,"SYNC TIME",UI_BAR_OK);
+  const char *feedback=rtcSyncFeedback();
+  if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::wifiFeedback,1); }
+  gfx->setTextColor(Layout::secondaryText); compactText("Radio turns off after use",66,214,188,1);
+  gfx->flush();
+}
+
+static void renderCompactNetworks() {
+  compactScreenTitle("SELECT NETWORK");
+  if (rtcWifiScanning()) {
+    gfx->setTextColor(Layout::secondaryText); compactText("SCANNING...",104,108,120,2);
+  } else {
+    int count=rtcWifiScanCount();
+    for (int i=0;i<4;++i) {
+      char row[44];
+      if (i<count) snprintf(row,sizeof(row),"%s  %d",rtcWifiScanSsid(i),rtcWifiScanRssi(i));
+      else snprintf(row,sizeof(row),"-");
+      compactButton(Layout::wifiNetworkRow[i],row,i<count?UI_WHITE:UI_TRACK);
+    }
+  }
+  gfx->flush();
+}
+
+static void renderCompactWifiPassword() {
+  compactScreenTitle("WIFI PASSWORD");
+  gfx->setTextColor(Layout::secondaryText); compactText(wifiSelectedSsid,8,36,256,1);
+  static const char keys[]="abcdefghijklmnopqrstuvwxyz0123456789.-";
+  static const char symbols[]="!@#$%^&*()_+=[]{}:;,.?/-\\|'\"~`<> ";
+  for (int i=0;i<42;++i) {
+    const auto r=Layout::wifiPasswordKey(i); char key[3]={0}; const char *label=key;
+    if (i<38) {
+      char c=wifiPasswordMode==2?symbols[i%strlen(symbols)]:keys[i];
+      key[0]=wifiPasswordMode==1&&c>='a'&&c<='z'?c-'a'+'A':c;
+    } else label=i==38?"aA#":i==39?"<-":i==40?"X":"OK";
+    compactButton(r,label,i>=40?UI_BAR_WARN:UI_WHITE);
+  }
+  char masked[34]; int shown=wifiPasswordLen>32?32:wifiPasswordLen;
+  memset(masked,'*',shown); masked[shown]=0;
+  gfx->fillRoundRect(8,34,256,18,4,UI_WHITE); gfx->setTextColor(UI_INK); compactText(masked,12,39,248,1);
+  gfx->flush();
+}
+
+static void renderCompactClock() {
+  if (clockPage==1) renderCompactManualClock();
+  else if (clockPage==2) renderCompactWifi();
+  else if (clockPage==3) renderCompactNetworks();
+  else if (clockPage==4) renderCompactWifiPassword();
+  else renderCompactSettings();
+}
+
 static void compactClockTap(int16_t x,int16_t y) {
-  if (Layout::screenBack.contains(x,y)) { clockOpen=false; return; }
-  if (Layout::hourMinus.contains(x,y)) clockH=(clockH+23)%24;
+  if (Layout::screenBack.contains(x,y)) {
+    if (clockPage) clockPage=0; else clockOpen=false;
+    return;
+  }
+  if (clockPage==0) {
+    if (Layout::syncGps.contains(x,y)) rtcRequestGpsSync();
+    else if (Layout::syncWifi.contains(x,y)) rtcRequestWifiSync();
+    else if (Layout::manualTime.contains(x,y)) openManualClock();
+    else if (Layout::soundToggle.contains(x,y)) { audioSetEnabled(!audioEnabled()); if (audioEnabled()) sfxPlay(SFX_TAP); }
+    else if (Layout::languageToggle.contains(x,y)) { setLang((Lang)((gLang+1)%LANG_COUNT)); applyLangFont(); sfxPlay(SFX_TAP); }
+    else if (Layout::wifiSettings.contains(x,y)) clockPage=2;
+    return;
+  }
+  if (clockPage==1) {
+    if (Layout::hourMinus.contains(x,y)) clockH=(clockH+23)%24;
   else if (Layout::hourPlus.contains(x,y)) clockH=(clockH+1)%24;
   else if (Layout::minuteMinus.contains(x,y)) clockM=(clockM+59)%60;
   else if (Layout::minutePlus.contains(x,y)) clockM=(clockM+1)%60;
-  else if (Layout::soundToggle.contains(x,y)) { audioSetEnabled(!audioEnabled()); if (audioEnabled()) sfxPlay(SFX_TAP); }
-  else if (Layout::languageToggle.contains(x,y)) { setLang((Lang)((gLang+1)%LANG_COUNT)); applyLangFont(); sfxPlay(SFX_TAP); }
-  else if (Layout::clockApply.contains(x,y)) applyClock();
+    else if (Layout::clockApply.contains(x,y)) applyClock();
+    return;
+  }
+  if (clockPage==2) {
+    if (Layout::wifiToggle.contains(x,y)) rtcWifiSetEnabled(!rtcWifiEnabled());
+    else if (Layout::wifiNetwork.contains(x,y)||Layout::wifiScan.contains(x,y)) { if (rtcWifiStartScan()) clockPage=3; }
+    else if (Layout::wifiConnect.contains(x,y)) rtcWifiConnectSaved();
+    else if (Layout::wifiForget.contains(x,y)) rtcWifiForget();
+    else if (Layout::wifiSyncTime.contains(x,y)) rtcRequestWifiSync();
+    return;
+  }
+  if (clockPage==3) {
+    if (rtcWifiScanning()) return;
+    for (int i=0;i<4&&i<rtcWifiScanCount();++i) if (Layout::wifiNetworkRow[i].contains(x,y)) {
+      snprintf(wifiSelectedSsid,sizeof(wifiSelectedSsid),"%s",rtcWifiScanSsid(i));
+      wifiPassword[0]=0; wifiPasswordLen=0; wifiPasswordMode=0; clockPage=4; return;
+    }
+    return;
+  }
+  if (clockPage==4&&Layout::wifiPasswordArea.contains(x,y)) {
+    int col=(x-Layout::wifiPasswordArea.x)/Layout::wifiPasswordCellW;
+    int row=(y-Layout::wifiPasswordArea.y)/Layout::wifiPasswordCellH;
+    int i=row*Layout::wifiPasswordCols+col;
+    if (i<0||i>=42||!Layout::wifiPasswordKey(i).contains(x,y)) return;
+    static const char keys[]="abcdefghijklmnopqrstuvwxyz0123456789.-";
+    static const char symbols[]="!@#$%^&*()_+=[]{}:;,.?/-\\|'\"~`<> ";
+    if (i<38&&wifiPasswordLen<sizeof(wifiPassword)-1) {
+      char c=wifiPasswordMode==2?symbols[i%strlen(symbols)]:keys[i];
+      wifiPassword[wifiPasswordLen++]=wifiPasswordMode==1&&c>='a'&&c<='z'?c-'a'+'A':c; wifiPassword[wifiPasswordLen]=0;
+    } else if (i==38) wifiPasswordMode=(wifiPasswordMode+1)%3;
+    else if (i==39&&wifiPasswordLen) wifiPassword[--wifiPasswordLen]=0;
+    else if (i==40) clockPage=2;
+    else if (i==41) { rtcWifiConnectCandidate(wifiSelectedSsid,wifiPassword); clockPage=2; }
+  }
+}
+
+static void renderCompactTimePrompt() {
+  gfx->fillScreen(UI_BG_DAY); gfx->setTextColor(UI_INK);
+  compactText("TIME COULD NOT BE",56,42,208,2); compactText("SYNCHRONIZED",76,66,168,2);
+  compactText("Game remains available.",76,98,180,1);
+  compactButton(Layout::accept,"SET TIME",UI_BAR_WARN); compactButton(Layout::cancel,"LATER",UI_WHITE); gfx->flush();
+}
+
+static bool compactTimePromptTap(int16_t x,int16_t y) {
+  if (!timePromptOpen) return false;
+  if (Layout::accept.contains(x,y)) { timePromptOpen=false; openManualClock(); }
+  else if (Layout::cancel.contains(x,y)) timePromptOpen=false;
+  return true;
 }
 
 static void renderCompactKeyboard() {

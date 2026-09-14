@@ -26,11 +26,27 @@ constexpr Rect cardHome{256,204,64,36};
 constexpr Rect nicknameField{128,38,184,34};
 constexpr Rect trainButton{52,158,216,38};
 
-// Settings / clock. Sound and language stay separate touch controls.
+// Settings landing page: time source owns a full row, separate from controls.
+constexpr Rect settingsStatus{12,34,296,26};
+constexpr Rect syncGps{12,68,92,36}, syncWifi{114,68,92,36}, manualTime{216,68,92,36};
+constexpr Rect soundToggle{12,112,140,36}, languageToggle{168,112,140,36};
+constexpr Rect wifiSettings{12,156,296,36}, settingsFeedback{12,200,296,24};
+// Manual clock page.
 constexpr Rect hourMinus{12,88,52,44}, hourPlus{68,88,52,44};
 constexpr Rect minuteMinus{200,88,52,44}, minutePlus{256,88,52,44};
-constexpr Rect soundToggle{12,148,140,40}, languageToggle{168,148,140,40};
-constexpr Rect clockApply{68,196,184,40};
+constexpr Rect clockApply{68,176,184,40};
+// Minimal Wi-Fi/NTP page.
+constexpr Rect wifiToggle{12,40,92,36}, wifiNetwork{114,40,194,36};
+constexpr Rect wifiScan{12,84,92,36}, wifiConnect{114,84,92,36}, wifiForget{216,84,92,36};
+constexpr Rect wifiSyncTime{12,128,296,36}, wifiFeedback{12,174,296,24};
+constexpr Rect wifiNetworkRow[4]={{12,40,296,36},{12,82,296,36},{12,124,296,36},{12,166,296,36}};
+constexpr Rect wifiPasswordArea{2,54,315,186};
+constexpr int wifiPasswordCols=7,wifiPasswordRows=6,wifiPasswordCellW=45,wifiPasswordCellH=31;
+constexpr Rect wifiPasswordKey(int i) {
+ return Rect{wifiPasswordArea.x+(i%wifiPasswordCols)*wifiPasswordCellW,
+             wifiPasswordArea.y+(i/wifiPasswordCols)*wifiPasswordCellH,
+             wifiPasswordCellW,wifiPasswordCellH};
+}
 
 // Touch nickname keyboard: six columns by five rows fill the lower 180 px.
 constexpr Rect keyboardArea{1,60,318,180};
