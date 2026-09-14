@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-// RTC PCF85063: hora persistente mientras la placa tenga alimentacion
+// Board clock: PCF85063 on Waveshare; saved-time-seeded system clock on T-Deck.
 bool rtcBegin();
 uint32_t rtcEpoch();             // segundos unix; 0 si el RTC no es valido
 void rtcSetEpoch(uint32_t e);
@@ -18,3 +18,6 @@ bool usbPresent();
 // la pulsacion corta la captura el firmware (pantalla on/off)
 void pwrSetup();
 bool pwrShortPressed();  // sondear en el loop
+
+// False means USB/charging/battery readings are unavailable, not measured false.
+bool powerStatusKnown();

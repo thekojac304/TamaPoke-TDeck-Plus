@@ -7,7 +7,10 @@ on:
 
 jobs:
   firmware:
-    name: Compile firmware
+    name: Compile ${{ matrix.board }} firmware
+    strategy:
+      matrix:
+        board: [waveshare, tdeck-plus]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,13 +28,15 @@ jobs:
           arduino-cli core install esp32:esp32@3.3.10
 
       - name: Install libraries
-        run: arduino-cli lib install "GFX Library for Arduino" SensorLib XPowersLib U8g2
+        run: arduino-cli lib install "GFX Library for Arduino@1.6.7" SensorLib@0.4.1 XPowersLib@0.3.3 U8g2@2.36.19
 
       - name: Compile
-        run: >
-          arduino-cli compile --warnings=all
-          --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=app3M_fat9M_16MB"
-          .
+        run: python3 tools/build_firmware.py ${{ matrix.board }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: build/${{ matrix.board }}/*.bin
 
   generated:
     name: Generated headers up to date

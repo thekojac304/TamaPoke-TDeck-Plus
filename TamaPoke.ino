@@ -12,7 +12,8 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include "Arduino_GFX_Library.h"
-#include "TouchDrvCSTXXX.hpp"
+#include "src/board/board.h"
+#include "src/ui/layout.h"
 #include <U8g2lib.h>  // fuentes CJK (japones); ver applyLangFont()
 #include "pin_config.h"
 #include "species.h"
@@ -27,18 +28,11 @@
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
 #define FW_VERSION "1.16"
 
-Arduino_DataBus *bus = new Arduino_ESP32QSPI(
-  LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-Arduino_CO5300 *panel = new Arduino_CO5300(
-  bus, LCD_RESET, 0 /*rotation*/, LCD_WIDTH, LCD_HEIGHT, 6, 0, 0, 0);
-// Framebuffer completo en PSRAM: dibujamos todo y hacemos flush() (sin parpadeo)
-Arduino_Canvas *gfx = new Arduino_Canvas(LCD_WIDTH, LCD_HEIGHT, panel);
+Arduino_Canvas *gfx = Board::canvas();
 
-TouchDrvCST92xx touch;
 // fuente CJK activa: de momento siempre false, la carga llegara con el
 // soporte de japones/coreano/chino (ver PR #13)
 bool gCjkFont = false;
-#define TOUCH_ADDR 0x5A  // CST9217
 Pet pet;
 
 // sprite animado de la SD para la especie actual (si existe el archivo)
@@ -54,9 +48,9 @@ struct {
   uint8_t act = PMD_IDLE;
   uint32_t t0 = 0;      // inicio de la animacion en curso
   uint32_t until = 0;   // fin del estado actual
-  float x = 233, targetX = 233;
+  float x = Layout::centerX, targetX = Layout::centerX;
 } beh;
-#define PET_GROUND 304  // linea de suelo de la mascota
+#define PET_GROUND Layout::ground  // linea de suelo de la mascota
 PmdMon galleryPmd;  // sprite grande de la vista detalle de la galeria (PMD/TPK2, legal)
 
 // galeria pokedex
@@ -104,9 +98,9 @@ int flashIdxForDex(int16_t dex) {
   return (dex >= 1 && dex <= 9) ? IDX[dex] : -1;
 }
 
-#define CX 233  // centro de la pantalla redonda
-#define CY 233
-#define PET_CY 202  // centro vertical del sprite
+#define CX Layout::centerX  // centro de la pantalla redonda
+#define CY Layout::centerY
+#define PET_CY Layout::petY  // centro vertical del sprite
 
 static const uint16_t INK_K = 0x18C4;  // spriteColor('k')
 
@@ -147,10 +141,6 @@ static const int16_t STARTER_DEX[3] = { 1, 4, 7 };
 #define FAR_BTN_H 58
 #define FAR_BTN_X (CX - FAR_BTN_W / 2)
 #define FAR_BTN_Y 176
-// el CST9217 avisa por el pin INT cuando hay datos tactiles; lo usamos para no
-// leer el bus I2C mientras el chip esta dormido (esa lectura se colgaba ~1s)
-volatile bool gTouchIrq = false;
-void IRAM_ATTR touchIsr() { gTouchIrq = true; }
 uint32_t lastRender = 0;
 // proteccion del AMOLED: atenuado por inactividad
 uint32_t lastInteract = 0;
@@ -173,39 +163,11 @@ void setup() {
   Serial.setTxTimeoutMs(0);
   Serial.printf("TamaPoke fw v%s\n", FW_VERSION);
   loadLang();  // idioma guardado (ES por defecto)
-  Wire.begin(IIC_SDA, IIC_SCL);
-  // CST9217 (tactil), AXP2101 (PMU) y PCF85063 (RTC) comparten este bus I2C.
-  // Red de seguridad para PMU/RTC (SensorLib NO respeta este timeout en el
-  // tactil; el cuelgue del tactil dormido se resuelve gateando por INT, ver
-  // handleTouch).
-  Wire.setTimeOut(50);
-
-  // CRITICO: encender la alimentacion del panel (BLDO1=OLED VDD 3.3V) ANTES de
-  // inicializar el display. Si el PMU se reseteo (drenaje total), este rail
-  // queda OFF y la pantalla se ve negra aunque el resto de la placa funcione.
-  pmuEnablePanel();
-
-  // QSPI a 80MHz (por defecto 40): el flush del framebuffer es el cuello de
-  // botella del fps (~56ms a 40MHz). Si el panel mostrara basura, bajar a 40M.
-  if (!gfx->begin(80000000)) Serial.println("gfx->begin() fallo");
-  panel->setBrightness(180);
-  applyLangFont();  // fuente del idioma guardado (clasica salvo CJK)
-
-  touch.setPins(TP_RESET, TP_INT);
-  bool touchOk = false;
-  for (int i = 0; i < 3 && !touchOk; i++) {  // a veces falla al primer intento
-    touchOk = touch.begin(Wire, 0x5A, IIC_SDA, IIC_SCL);
-    if (!touchOk) delay(150);
+  if (!Board::begin(gfx)) {
+    Serial.println("FATAL display/canvas initialization failed");
+    while (true) delay(1000);
   }
-  if (!touchOk) Serial.println("CST9217 no detectado");
-  // begin() deja el chip en modo comando (lee la identidad y no sale);
-  // hace falta un reset por hardware para que vuelva a reportar toques
-  touch.reset();
-  touch.setMaxCoordinates(LCD_WIDTH, LCD_HEIGHT);
-  touch.setMirrorXY(true, true);  // el panel esta montado girado 180 grados
-  // INT activo-bajo: salta cuando hay datos. Gatea las lecturas I2C (ver loop)
-  pinMode(TP_INT, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(TP_INT), touchIsr, FALLING);
+  applyLangFont();
 
   pet.begin();
   sdBegin();
@@ -249,7 +211,7 @@ void ensureMon() {
   monShinyFor = pet.shiny;
   mon.unload();
   pmd.unload();
-  beh.x = beh.targetX = 233;
+  beh.x = beh.targetX = Layout::centerX;
   beh.mode = 0;
   beh.until = 0;
   if (pet.speciesId >= 1 && pet.speciesId <= DEX_COUNT) {
@@ -318,8 +280,8 @@ void loop() {
     lastHealth = now;
     Serial.printf("HEALTH up=%lus heap=%u min=%u bat=%d%% mv=%d chg=%d usb=%d dim=%u off=%d\n",
                   (unsigned long)(now / 1000), ESP.getFreeHeap(), ESP.getMinFreeHeap(),
-                  batPercent(), batMillivolts(), batCharging() ? 1 : 0,
-                  usbPresent() ? 1 : 0, dimStage, screenOff ? 1 : 0);
+                  batPercent(), batMillivolts(), powerStatusKnown() ? (batCharging() ? 1 : 0) : -1,
+                  powerStatusKnown() ? (usbPresent() ? 1 : 0) : -1, dimStage, screenOff ? 1 : 0);
   }
 
   // 85 ms en juego/saco: margen seguro para que el redibujado no pise el envio
@@ -352,7 +314,7 @@ void updateBrightness(uint32_t now) {
   static uint8_t current = 255;
   if (target != current) {
     current = target;
-    panel->setBrightness(target);
+    Board::brightness(target);
   }
 }
 
@@ -393,6 +355,7 @@ void handleSerial() {
     Serial.printf("rtc=%u\n", rtcEpoch());
     Serial.println("DONE");
   } else if (line == "GAL") {
+    if (Layout::compact) { Serial.println("Gallery deferred on this layout"); return; }
     galleryOpen = !galleryOpen;
     galleryDetail = 0;
     galleryDirty = true;
@@ -451,7 +414,7 @@ void handleSerial() {
     Serial.printf("spec=%d nv=%u com=%u fel=%u ene=%u lim=%u desc=%u sd=%d mon=%d bat=%d usb=%d rtc=%u\n",
                   pet.speciesId, pet.level(), pet.fullness, pet.joy, pet.energy,
                   pet.hygiene, pet.careMistakes, sdReady, mon.loaded,
-                  batPercent(), usbPresent(), rtcEpoch());
+                  batPercent(), powerStatusKnown() ? (int)usbPresent() : -1, rtcEpoch());
     Serial.printf("peso=%u fue=%u def=%u vel=%u genes=%u/%u/%u tr=%u/%u/%u baya=%d\n",
                   pet.weight, pet.atkStat(), pet.defStat(), pet.speStat(),
                   pet.geneAtk, pet.geneDef, pet.geneSpe,
@@ -466,7 +429,11 @@ void handleSerial() {
 // ---------- entrada tactil ----------
 
 bool inPetZone(int16_t x, int16_t y) {
+#if TAMAPOKE_TDECK_PLUS
+  return Layout::scene.contains(x,y);
+#else
   return x > 110 && x < 356 && y > 95 && y < 310;
+#endif
 }
 
 // el toque se resuelve al LEVANTAR el dedo para distinguir tap de deslizar
@@ -474,27 +441,10 @@ void handleTouch() {
   static uint32_t lastPoll = 0;
   if (millis() - lastPoll < 20) return;  // 50 Hz le sobra a un dedo
   lastPoll = millis();
-  // solo tocamos el bus si el chip aviso por INT o si el dedo sigue abajo (hay
-  // que detectar el levantamiento). Leer el CST9217 dormido se colgaba ~1s y
-  // congelaba el loop entero; SensorLib no respeta el timeout de Wire.
-  if (!gTouchIrq && !wasPressed) return;
-  gTouchIrq = false;
-  // Un ciclo de solo direccion antes de leer. Sin esto, getPoint() se colgaba
-  // exactamente 1000 ms (el timeout por defecto del driver I2C, que SensorLib no
-  // acota) y congelaba el loop entero: es lo que se percibia como "el minijuego
-  // se congela 2-3 segundos al tocar la bola" (issue #16), porque ahi los toques
-  // son rapidos y seguidos.
-  //
-  // Medido en placa, jugando lo mismo (~470 lecturas, marcador ~50):
-  //   sin esta linea: 5 parones de 1000 ms en 60 s
-  //   con ella:       0
-  // El contador de rechazos salio 0 en ambos casos, asi que NO funciona
-  // saltandose lecturas cuando el chip no contesta: lo que hace es despertarlo,
-  // para que la lectura siguiente no se encuentre el CST9217 dormido.
-  Wire.beginTransmission(TOUCH_ADDR);
-  if (Wire.endTransmission() != 0) return;  // no responde: se reintenta en 20 ms
-  int16_t x, y;
-  bool pressed = touch.getPoint(&x, &y, 1) > 0;
+  Board::TouchSample sample{};
+  if (!Board::sampleTouch(sample, wasPressed)) return;
+  int16_t x = sample.x, y = sample.y;
+  bool pressed = sample.pressed;
 
   // saco de entrenamiento: cada toque cuenta al instante (aporrear rapido)
   if (sackOpen) {
@@ -530,8 +480,8 @@ void handleTouch() {
     int dx = tXl - tX0, dy = tYl - tY0;
     uint32_t dt = millis() - tStart;
     if (!holdFired && !swallowGesture) {
-      if (abs(dx) > 80 && abs(dy) < 70 && dt < 800) onSwipe(dx > 0 ? 1 : -1);
-      else if (abs(dy) > 80 && abs(dx) < 70 && dt < 800) onSwipeV(dy > 0 ? 1 : -1);
+      if (abs(dx) > Layout::swipe && abs(dy) < 70 && dt < 800) onSwipe(dx > 0 ? 1 : -1);
+      else if (abs(dy) > Layout::swipe && abs(dx) < 70 && dt < 800) onSwipeV(dy > 0 ? 1 : -1);
       else if (dt < 1500 && abs(dx) < 40 && abs(dy) < 40) onTap(tX0, tY0);
     }
   }
@@ -542,6 +492,7 @@ void handleTouch() {
 void openClock();  // prototipo
 
 void onSwipeV(int dir) {
+  if (Layout::compact) { feedMenuUntil = confirmUntil = choiceKind = 0; return; }
   if (pet.awaitingStarter()) return;  // bloqueado durante la eleccion de inicial
   if (gameOpen || galleryOpen || kbOpen || sackOpen || pet.ceremony) return;
   if (clockOpen) { clockOpen = false; return; }
@@ -559,6 +510,7 @@ void onSwipeV(int dir) {
 
 // deslizar: dir +1 = hacia la derecha
 void onSwipe(int dir) {
+  if (Layout::compact) { feedMenuUntil = confirmUntil = choiceKind = 0; return; }
   if (pet.awaitingStarter()) return;  // bloqueado durante la eleccion de inicial
   if (gameOpen || kbOpen || clockOpen) return;
   if (cardOpen) {  // dentro de la ficha: cambiar entre las 4 paginas
@@ -594,7 +546,13 @@ void onSwipe(int dir) {
   }
 }
 
+void compactTap(int16_t x, int16_t y);
+void renderCompact();
+
 void onTap(int16_t x, int16_t y) {
+#if TAMAPOKE_TDECK_PLUS
+  compactTap(x,y); return;
+#endif
   // Serial.printf("TOUCH %d %d\n", x, y);  // diagnostico (silenciado: satura el log)
   if (pet.awaitingStarter()) {  // primera partida: elegir inicial
     for (int i = 0; i < 3; i++) {
@@ -960,6 +918,9 @@ void printT(const char *s) {
 }
 
 void render() {
+#if TAMAPOKE_TDECK_PLUS
+  renderCompact(); return;
+#endif
   if (pet.awaitingStarter()) {  // primera partida: elegir inicial (prioridad total)
     renderStarterSelect();
     return;
@@ -1103,6 +1064,7 @@ void render() {
 // ---------- minijuego: toques con la pokeball ----------
 
 void startGame() {
+  if (Layout::compact) { pet.play(); return; }
   if (pet.isEgg() || pet.sleeping || pet.ceremony) return;
   gameOpen = true;
   gameOverUntil = 0;
@@ -1196,6 +1158,7 @@ void stepGame() {
 // ---------- saco de entrenamiento (entrena la fuerza) ----------
 
 void startSack() {
+  if (Layout::compact) return;
   if (pet.isEgg() || pet.sleeping || pet.ceremony) return;
   sackOpen = true;
   sackUntil = millis() + 10000;
@@ -2222,6 +2185,9 @@ void drawPet() {
   }
   const Species &sp = SPECIES[fi];
   int s = sp.scale;
+#if TAMAPOKE_TDECK_PLUS
+  s = Layout::fitScale(32,32,s);
+#endif
   int x = CX - 16 * s;
   int y = PET_CY - 16 * s;
 
@@ -2232,7 +2198,11 @@ void drawPet() {
     int sfi = flashIdxForDex(showDex);
     if (sfi >= 0) {
       const Species &show = SPECIES[sfi];
-      drawMap(show.sprite, SPRITE_H, CX - 16 * show.scale, PET_CY - 16 * show.scale, show.scale, flash);
+      int zoom = show.scale;
+#if TAMAPOKE_TDECK_PLUS
+      zoom = Layout::fitScale(32,32,zoom);
+#endif
+      drawMap(show.sprite, SPRITE_H, CX - 16 * zoom, PET_CY - 16 * zoom, zoom, flash);
     }
     return;
   }
@@ -2341,11 +2311,19 @@ void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool
   if (sBase > maxS) sBase = maxS;
   uint8_t s = sBase;
   while (s > 2 && a.h * s > 250) s--;  // acciones con frame grande (ataque)
+#if TAMAPOKE_TDECK_PLUS
+  s = Layout::fitScale(a.w,a.h,maxS);
+  cx = constrain(cx, Layout::scene.x + a.w*s/2,
+                  Layout::scene.x + Layout::scene.w - (a.w*s+1)/2);
+#endif
   uint8_t fi = pmdFrameAt(a, t, loop);
   const uint8_t *fr = a.data + (uint32_t)fi * a.w * a.h;
   // anclar por los pies (a.base), no por el alto del lienzo: asi las acciones
   // con padding distinto (Hurt, Eat...) quedan todas a la misma altura de suelo
   int x0 = cx - a.w * s / 2, y0 = groundY - (a.base ? a.base : a.h) * s;
+#if TAMAPOKE_TDECK_PLUS
+  y0 = constrain(y0, Layout::scene.y, Layout::scene.y + Layout::scene.h - a.h*s);
+#endif
   for (int r = 0; r < a.h; r++) {
     const uint8_t *row = fr + r * a.w;
     for (int c = 0; c < a.w; c++) {
@@ -2366,7 +2344,7 @@ void behNext() {
   int r = random(100);
   if (r < 35 && (pmd.has(PMD_WALKL) || pmd.has(PMD_WALKR))) {
     beh.mode = 1;  // paseo
-    beh.targetX = 150 + random(176);
+    beh.targetX = Layout::wanderMin + random(Layout::wanderSpan);
     beh.until = now + 15000;
   } else if (r < 60) {
     // gesto aleatorio entre los disponibles
@@ -2436,9 +2414,15 @@ void drawPetPMD() {
 // sprite animado desde la SD: zoom entero por pixel, frames a su ritmo
 void drawPetSD() {
   int s = mon.scale;
+#if TAMAPOKE_TDECK_PLUS
+  s = Layout::fitScale(mon.w,mon.h,s);
+#endif
   int w = mon.w * s, h = mon.h * s;
   int x = CX - w / 2;
   int y = PET_CY - h / 2;
+#if TAMAPOKE_TDECK_PLUS
+  y = constrain(PET_GROUND-h, Layout::scene.y, Layout::scene.y+Layout::scene.h-h);
+#endif
 
   bool sil = false;
   if (pet.evolving()) {
@@ -2573,3 +2557,5 @@ void drawMap(const char *const *map, int n, int x, int y, int s, bool silhouette
     }
   }
 }
+
+#include "src/ui/playable_landscape.h"

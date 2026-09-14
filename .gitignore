@@ -18,3 +18,5 @@ test/build/
 # borrador local de la ficha de MakerWorld y modelado abandonado de la carcasa
 MAKERWORLD.md
 case/
+
+.build-tools/
