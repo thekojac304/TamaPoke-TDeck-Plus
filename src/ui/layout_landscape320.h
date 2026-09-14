@@ -27,13 +27,14 @@ constexpr Rect cardHome{256,204,64,36};
 constexpr Rect nicknameField{128,38,184,34};
 constexpr Rect trainButton{52,158,216,38};
 
-// Settings landing page: time source owns a full row, separate from controls.
-constexpr Rect settingsClock{12,34,86,26}, settingsSource{106,34,202,26};
-constexpr Rect syncGps{12,68,92,36}, syncWifi{114,68,92,36}, manualTime{216,68,92,36};
-constexpr Rect soundToggle{12,100,140,30}, languageToggle{168,100,140,30};
-constexpr Rect wifiSettings{12,136,296,30};
-constexpr Rect timeoutSetting{12,172,188,32}, batteryStatus{208,172,100,32};
-constexpr Rect settingsFeedback{12,208,250,22};
+// T-Deck Settings uses three full pages. These rectangles are also the touch
+// hitboxes; no separate coordinate constants are allowed in the handlers.
+constexpr Rect settingsTabs[3]={{8,36,96,32},{112,36,96,32},{216,36,96,32}};
+constexpr Rect settingsClock{12,78,120,52}, settingsSource{140,78,168,52};
+constexpr Rect syncGps{12,144,92,42}, syncWifi{114,144,92,42}, manualTime{216,144,92,42};
+constexpr Rect settingsFeedback{12,190,296,14};
+constexpr Rect soundToggle{12,78,140,38}, languageToggle{168,78,140,38};
+constexpr Rect timeoutSetting{12,126,296,38}, batteryStatus{12,174,296,30};
 // Manual clock page.
 constexpr Rect hourMinus{12,88,52,44}, hourPlus{68,88,52,44};
 constexpr Rect minuteMinus{200,88,52,44}, minutePlus{256,88,52,44};
@@ -41,9 +42,9 @@ constexpr Rect clockOnlyApply{12,166,142,42}, clockCatchup{166,166,142,42};
 constexpr Rect manualSource{12,216,200,18};
 constexpr Rect catchupInfo{12,38,296,104}, catchupApply{24,148,272,38}, catchupCancel{24,194,272,38};
 // Minimal Wi-Fi/NTP page.
-constexpr Rect wifiToggle{12,40,92,36}, wifiNetwork{114,40,194,36};
-constexpr Rect wifiScan{12,84,92,36}, wifiConnect{114,84,92,36}, wifiForget{216,84,92,36};
-constexpr Rect wifiSyncTime{12,128,296,36}, wifiFeedback{12,174,296,24};
+constexpr Rect wifiToggle{12,78,92,36}, wifiNetwork{114,78,194,36};
+constexpr Rect wifiScan{12,124,92,36}, wifiConnect{114,124,92,36}, wifiForget{216,124,92,36};
+constexpr Rect wifiSyncTime{12,170,296,36}, wifiFeedback{12,210,296,18};
 constexpr Rect wifiNetworkRow[4]={{12,40,296,36},{12,82,296,36},{12,124,296,36},{12,166,296,36}};
 constexpr Rect wifiPasswordArea{2,54,315,186};
 constexpr int wifiPasswordCols=7,wifiPasswordRows=6,wifiPasswordCellW=45,wifiPasswordCellH=31;

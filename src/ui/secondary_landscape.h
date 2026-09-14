@@ -143,8 +143,14 @@ static void compactCardTap(int16_t x,int16_t y) {
   if (cardPage==1&&Layout::trainButton.contains(x,y)) { cardOpen=false; startSack(); }
 }
 
+static void compactSettingsTabs(uint8_t selected) {
+  static const char *const labels[3]={"TIME","WI-FI","SYSTEM"};
+  for (int i=0;i<3;++i) compactButton(Layout::settingsTabs[i],labels[i],i==selected?UI_BAR_WARN:UI_WHITE);
+}
+
 static void renderCompactSettings() {
   compactScreenTitle(T(S_SET_TIME));
+  compactSettingsTabs(0);
   gfx->fillRoundRect(Layout::settingsClock.x,Layout::settingsClock.y,Layout::settingsClock.w,Layout::settingsClock.h,6,UI_WHITE);
   gfx->fillRoundRect(Layout::settingsSource.x,Layout::settingsSource.y,Layout::settingsSource.w,Layout::settingsSource.h,6,UI_WHITE);
   gfx->setTextColor(rtcAuthoritative()?UI_BAR_OK:Layout::secondaryText);
@@ -153,24 +159,23 @@ static void renderCompactSettings() {
   compactCentered(clock,Layout::settingsClock,2);
   compactCentered(rtcTimeStatusLabel(),Layout::settingsSource,2);
   compactButton(Layout::syncGps,"SYNC GPS",UI_WHITE);
-  compactButton(Layout::syncWifi,"SYNC WIFI",UI_WHITE);
-  compactButton(Layout::manualTime,"MANUAL",UI_WHITE);
-  compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
-  char lang[16]; snprintf(lang,sizeof(lang),"%s: %s >",T(S_LANG_LABEL),LANG_CODES[gLang]);
-  compactButton(Layout::languageToggle,lang,UI_WHITE);
-  char wifi[48]; snprintf(wifi,sizeof(wifi),"WIFI: %s%s",rtcWifiEnabled()?"ON ":"OFF",rtcWifiConfigured()?rtcWifiSsid():"NOT SET");
-  compactButton(Layout::wifiSettings,wifi,UI_WHITE);
-  char timeout[32]; snprintf(timeout,sizeof(timeout),"SCREEN: %s",Board::displayTimeoutLabel());
-  compactButton(Layout::timeoutSetting,timeout,UI_WHITE);
-  int battery=batPercent(),mv=batMillivolts(); char power[24];
-  if (battery>=0&&mv>0) snprintf(power,sizeof(power),"%d%% %d.%02dV",battery,mv/1000,(mv%1000)/10);
-  else snprintf(power,sizeof(power),"BAT: --");
-  compactButton(Layout::batteryStatus,power,UI_WHITE);
+  compactButton(Layout::syncWifi,"SYNC WI-FI",UI_WHITE);
+  compactButton(Layout::manualTime,"SET MANUALLY",UI_WHITE);
   const char *feedback=rtcSyncFeedback();
   if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::settingsFeedback,1); }
-  char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
-  gfx->setTextColor(Layout::secondaryText); compactText(ver,276,226,40,1);
   gfx->flush();
+}
+
+static void renderCompactSystem() {
+  compactScreenTitle("SETTINGS"); compactSettingsTabs(2);
+  compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
+  char lang[16]; snprintf(lang,sizeof(lang),"%s: %s >",T(S_LANG_LABEL),LANG_CODES[gLang]); compactButton(Layout::languageToggle,lang,UI_WHITE);
+  char timeout[32]; snprintf(timeout,sizeof(timeout),"DISPLAY TIMEOUT: %s",Board::displayTimeoutLabel()); compactButton(Layout::timeoutSetting,timeout,UI_WHITE);
+  int battery=batPercent(),mv=batMillivolts(); char power[40];
+  if (battery>=0&&mv>0) snprintf(power,sizeof(power),"BATTERY: %d.%02dV  ~%d%%",mv/1000,(mv%1000)/10,battery);
+  else snprintf(power,sizeof(power),"BATTERY: NOT AVAILABLE");
+  compactButton(Layout::batteryStatus,power,UI_WHITE);
+  gfx->setTextColor(Layout::secondaryText); compactText("Percentage is estimated",82,210,156,1); gfx->flush();
 }
 
 static void renderCompactManualClock() {
@@ -205,9 +210,11 @@ static void renderCompactCatchupConfirm() {
 }
 
 static void renderCompactWifi() {
-  compactScreenTitle("WIFI TIME");
+  compactScreenTitle("SETTINGS"); compactSettingsTabs(1);
   compactButton(Layout::wifiToggle,rtcWifiEnabled()?"WIFI: ON":"WIFI: OFF",rtcWifiEnabled()?UI_BAR_OK:UI_WHITE);
-  char network[44]; snprintf(network,sizeof(network),"SSID: %s",rtcWifiConfigured()?rtcWifiSsid():"NOT SET");
+  char network[44];
+  if (rtcWifiConfigured()) snprintf(network,sizeof(network),"SSID: %s",rtcWifiSsid());
+  else snprintf(network,sizeof(network),"Wi-Fi not configured");
   compactButton(Layout::wifiNetwork,network,UI_WHITE);
   compactButton(Layout::wifiScan,rtcWifiScanning()?"SCANNING":"SCAN",UI_WHITE);
   compactButton(Layout::wifiConnect,"CONNECT",UI_WHITE);
@@ -215,7 +222,6 @@ static void renderCompactWifi() {
   compactButton(Layout::wifiSyncTime,"SYNC TIME",UI_BAR_OK);
   const char *feedback=rtcSyncFeedback();
   if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::wifiFeedback,1); }
-  gfx->setTextColor(Layout::secondaryText); compactText("Radio turns off after use",66,214,188,1);
   gfx->flush();
 }
 
@@ -260,22 +266,30 @@ static void renderCompactClock() {
   else if (clockPage==3) renderCompactNetworks();
   else if (clockPage==4) renderCompactWifiPassword();
   else if (clockPage==5) renderCompactCatchupConfirm();
+  else if (clockPage==6) renderCompactSystem();
   else renderCompactSettings();
 }
 
 static void compactClockTap(int16_t x,int16_t y) {
   if (Layout::screenBack.contains(x,y)) {
     if (clockPage==5) { rtcCancelManualCatchup(); clockPage=1; }
-    else if (clockPage) clockPage=0; else clockOpen=false;
+    else if (clockPage==1) clockPage=0;
+    else if (clockPage==3||clockPage==4) clockPage=2;
+    else clockOpen=false;
     return;
+  }
+  if (clockPage==0||clockPage==2||clockPage==6) {
+    for (int i=0;i<3;++i) if (Layout::settingsTabs[i].contains(x,y)) { clockPage=i==0?0:i==1?2:6; return; }
   }
   if (clockPage==0) {
     if (Layout::syncGps.contains(x,y)) rtcRequestGpsSync();
     else if (Layout::syncWifi.contains(x,y)) rtcRequestWifiSync();
     else if (Layout::manualTime.contains(x,y)) openManualClock();
-    else if (Layout::soundToggle.contains(x,y)) { audioSetEnabled(!audioEnabled()); if (audioEnabled()) sfxPlay(SFX_TAP); }
+    return;
+  }
+  if (clockPage==6) {
+    if (Layout::soundToggle.contains(x,y)) { audioSetEnabled(!audioEnabled()); if (audioEnabled()) sfxPlay(SFX_TAP); }
     else if (Layout::languageToggle.contains(x,y)) { setLang((Lang)((gLang+1)%LANG_COUNT)); applyLangFont(); sfxPlay(SFX_TAP); }
-    else if (Layout::wifiSettings.contains(x,y)) clockPage=2;
     else if (Layout::timeoutSetting.contains(x,y)) {
       Board::setDisplayTimeoutIndex((Board::displayTimeoutIndex()+1)%TpDisplay::TIMEOUT_COUNT);
       lastInteract=millis();

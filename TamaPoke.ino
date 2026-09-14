@@ -69,7 +69,7 @@ uint8_t cardPage = 0;         // 0 perfil, 1 stats+medallas
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
 int clockH = 12, clockM = 0;  // hora en edicion
 #if TAMAPOKE_TDECK_PLUS
-uint8_t clockPage = 0;        // 0 settings, 1 manual, 2 Wi-Fi, 3 networks, 4 password, 5 catch-up confirm
+uint8_t clockPage = 0;        // 0 Time, 1 manual, 2 Wi-Fi, 3 networks, 4 password, 5 catch-up confirm, 6 System
 bool timePromptOpen = false, timePromptShown = false;
 uint32_t manualReferenceEpoch = 0, manualNewEpoch = 0, manualElapsedSeconds = 0;
 char wifiSelectedSsid[33] = "", wifiPassword[65] = "";

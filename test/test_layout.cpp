@@ -69,7 +69,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::languageToggle); fits(Layout::clockOnlyApply); fits(Layout::clockCatchup);
   fits(Layout::manualSource); fits(Layout::catchupInfo); fits(Layout::catchupApply); fits(Layout::catchupCancel);
   fits(Layout::settingsClock); fits(Layout::settingsSource); fits(Layout::syncGps); fits(Layout::syncWifi);
-  fits(Layout::manualTime); fits(Layout::wifiSettings); fits(Layout::settingsFeedback);
+  fits(Layout::manualTime); fits(Layout::settingsFeedback);
   fits(Layout::timeoutSetting); fits(Layout::batteryStatus);
   fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
   fits(Layout::wifiConnect); fits(Layout::wifiForget); fits(Layout::wifiSyncTime);
@@ -78,6 +78,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::sackExit); fits(Layout::sackTarget); fits(Layout::gameViewport);
   fits(Layout::gameHud); fits(Layout::gameExit);
   for (int i=0;i<4;++i) fits(Layout::cardTabs[i]);
+  for (int i=0;i<3;++i) fits(Layout::settingsTabs[i]);
   for (int i=0;i<30;++i) {
     auto key=Layout::keyboardKey(i); fits(key);
     CHECK(Layout::keyboardArea.contains(key.x,key.y));
@@ -92,16 +93,24 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
     return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
   };
   CHECK(!overlaps(Layout::settingsClock,Layout::settingsSource));
+  CHECK(!overlaps(Layout::settingsTabs[0],Layout::settingsTabs[1]));
+  CHECK(!overlaps(Layout::settingsTabs[1],Layout::settingsTabs[2]));
+  CHECK(!overlaps(Layout::settingsTabs[0],Layout::settingsClock));
   CHECK(!overlaps(Layout::homeBattery,Layout::homeDex));
   CHECK(!overlaps(Layout::homeBattery,Layout::homeSettings));
   CHECK(!overlaps(Layout::settingsClock,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncWifi));
   CHECK(!overlaps(Layout::settingsSource,Layout::manualTime));
-  CHECK(!overlaps(Layout::settingsSource,Layout::soundToggle));
-  CHECK(!overlaps(Layout::settingsSource,Layout::languageToggle));
+  CHECK(!overlaps(Layout::syncGps,Layout::syncWifi));
+  CHECK(!overlaps(Layout::syncWifi,Layout::manualTime));
+  CHECK(!overlaps(Layout::soundToggle,Layout::languageToggle));
   CHECK(!overlaps(Layout::timeoutSetting,Layout::batteryStatus));
-  CHECK(!overlaps(Layout::timeoutSetting,Layout::settingsFeedback));
+  CHECK(!overlaps(Layout::wifiToggle,Layout::wifiScan));
+  CHECK(!overlaps(Layout::wifiNetwork,Layout::wifiConnect));
+  CHECK(!overlaps(Layout::wifiScan,Layout::wifiConnect));
+  CHECK(!overlaps(Layout::wifiConnect,Layout::wifiForget));
+  CHECK(!overlaps(Layout::wifiConnect,Layout::wifiSyncTime));
   CHECK(!overlaps(Layout::manualSource,Layout::clockOnlyApply));
   CHECK(!overlaps(Layout::manualSource,Layout::clockCatchup));
   CHECK(!overlaps(Layout::catchupInfo,Layout::catchupApply));
