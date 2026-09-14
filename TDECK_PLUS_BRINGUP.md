@@ -4,6 +4,108 @@ Branch: `codex/tdeck-plus-port`. This is a compile-tested bring-up candidate;
 boot, panel colors, touch alignment, shared-bus reliability, and physical save
 persistence still require a T-Deck Plus. No device was flashed during development.
 
+## Physical-validation audio and time fixes
+
+The compact touch router had omitted the original sound calls for starter/egg
+taps, food selection, care-button taps and petting. The ball game remained
+audible because its sound call lives in shared game logic. Those compact paths
+now emit the same existing IDs as the round UI. The T-Deck backend logs enqueue,
+start, completion and cancellation/discard, stops the current tone on mute or
+sleep, clears queued effects, and still releases I2S after each burst.
+
+The previous first authoritative sync deliberately preserved a stale legacy
+wall value, while the already-open Settings screen retained its old edit buffer.
+That produced `TIME: SYNC` without a corrected displayed clock. An unmapped
+legacy clock now adopts trustworthy UTC without inventing offline elapsed time;
+after the user sets local time, the normal `offset` mapping is persisted. A
+mapped clock applies safe powered-off catch-up once. Settings renders the live
+wall clock and refreshes the manual editor immediately when sync arrives, which
+also updates day/night rendering through `pet.lastSeenEpoch`.
+
+The T-Deck state flow is:
+
+```text
+GPS: SEARCHING (12 s preference)
+  -> TIME: GPS (first valid source wins)
+  -> WIFI: CONNECTING -> WIFI: SYNCING -> TIME: WIFI
+  -> TIME: UNSYNCED -> one Set Time / Later prompt
+Manual adjustment -> TIME: MANUAL
+```
+
+GPS parsing continues during Wi-Fi fallback, but a second source cannot deliver
+another `syncClock()` or another powered-off catch-up. Manual Set Time uses
+`setClock()` and never performs catch-up. Invalid, backward or over-ten-year UTC
+deltas are rejected. Wi-Fi/NTP work is asynchronous and the radio is disabled
+again after scan, setup, connect, success or failure.
+
+Settings now has non-overlapping `SYNC GPS`, `SYNC WIFI`, and `MANUAL` controls,
+plus a dedicated live time/source row. `WIFI TIME` provides Wi-Fi on/off, saved
+SSID, scan, connect, forget and sync controls. Scan shows the strongest nearby
+networks; selection opens a touch password keyboard with lower/upper/symbol
+pages. Credentials are saved only after a successful connection.
+
+TamaPoke never reads Launcher, Meshtastic, WadaMesh or generic ESP32 station
+credentials. Its new NVS namespace is `tp-wifi`:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `on` | bool | User permits Wi-Fi fallback; defaults false |
+| `ssid` | string | TamaPoke-selected station SSID |
+| `pass` | string | Station password; never logged |
+
+The existing `tp-clock` keys (`wall`, `utc`, `offset`, `mapped`) and pet-save
+schema are unchanged.
+
+Successful GPS sync emits (numbers vary):
+
+```text
+CLOCK source=GPS acquired_utc=<epoch>
+CLOCK references saved_utc=<epoch-or-0> saved_wall=<epoch-or-0> offset=<seconds>
+CLOCK mapping current_wall=<epoch> synced_wall=<epoch> offset=<seconds>
+CLOCK game pre_sync=<epoch> post_sync=<epoch> offline_applied=<0|1> catchup_minutes=<minutes>
+```
+
+Successful NTP sync adds the connection/request lines:
+
+```text
+CLOCK Wi-Fi connect purpose=<auto-ntp|manual-ntp> credentials=tp-wifi
+CLOCK source=WIFI NTP requested
+CLOCK source=WIFI acquired_utc=<epoch>
+CLOCK references saved_utc=<epoch-or-0> saved_wall=<epoch-or-0> offset=<seconds>
+CLOCK mapping current_wall=<epoch> synced_wall=<epoch> offset=<seconds>
+CLOCK game pre_sync=<epoch> post_sync=<epoch> offline_applied=<0|1> catchup_minutes=<minutes>
+```
+
+Bounded automatic failure emits one of:
+
+```text
+CLOCK automatic sync failed gps=<no-time|no-data> wifi=<disabled|not-configured>
+```
+
+or, after a configured network attempt:
+
+```text
+CLOCK Wi-Fi/NTP failed reason=<WIFI CONNECT FAILED|NTP FAILED>
+CLOCK automatic sync failed gps=<no-time|no-data> wifi=<reason>
+```
+
+Physical validation for this pass:
+
+1. Verify startup, hatch, feed, pet/heart, light sleep/wake, bath, evolution,
+   ceremony, strength training and ball-game sounds; mute during a long effect
+   and confirm playback/queue stop; confirm idle has no hiss.
+2. Boot outdoors and confirm the status changes from `GPS: SEARCHING` to
+   `TIME: GPS`, the displayed time changes immediately, and day/night follows.
+3. Leave Settings and then the manual editor open while GPS sync arrives; both
+   must refresh without closing, overlap or stale hour/minute values.
+4. Enable Wi-Fi, scan, select a network, enter its password, connect, then sync.
+   Confirm `TIME: WIFI`, no password in serial output, and radio shutdown.
+5. Reboot after a measured powered-off interval and confirm exactly one nonzero
+   `catchup_minutes`; repeat with a backward/bad timestamp and confirm zero.
+6. Disable Wi-Fi and test GPS failure: the Set Time/Later prompt appears once,
+   Later keeps gameplay usable, and manual setting shows `TIME: MANUAL`.
+7. Smoke-test the Waveshare build for unchanged clock, layout and audio behavior.
+
 ## Scope and architecture
 
 - `src/board/board.h` exposes canvas creation/startup, normalized touch,
@@ -143,15 +245,14 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 - The ESP32 system clock is the active game clock. A non-blocking GPS parser first
   accepts checksum-valid RMC or ZDA UTC (date/time does not require a positional
-  fix). After 45 seconds, NTP is tried only when the ESP32 already has stored
-  station credentials; connection and synchronization have bounded timeouts.
-  Manual Set Time remains available and the settings screen shows `TIME: LOCAL`
-  until an authoritative source has been accepted.
+  fix). After a 12-second preference window, NTP is tried only when the user has
+  enabled Wi-Fi and configured TamaPoke credentials. Connection and synchronization
+  have bounded timeouts; manual time remains available throughout.
 - The game still displays its historical local-wall-clock-shaped epoch. The
   separate `tp-clock` NVS namespace pairs that wall value with authoritative UTC
-  and an offset. The first sync of a legacy save preserves its displayed clock
-  and deliberately does not guess whether the old difference was timezone or
-  powered-off time. Later boots use the paired UTC references for one absolute
+  and an offset. The first sync of an unmapped legacy save adopts UTC and
+  deliberately does not guess powered-off time. Later manual time establishes
+  the local offset; mapped boots use the paired UTC references for one absolute
   `syncClock()` call; negative and over-ten-year source jumps are not applied,
   while the existing game logic retains its two-week progression cap.
 - The CPU keeps running while dimmed. No deep sleep or physical power-key
@@ -228,7 +329,7 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 - Original Waveshare default target built successfully immediately after board
   extraction. Both final target builds use the pinned dependencies above.
-- Host suite: **110 tests, 39,363 assertions, all passed**. Coverage includes every
+- Host suite: **122 tests, 39,480 assertions, all passed**. Coverage includes every
   current PMD pack; generated secondary layout cells and controls; visible home
   navigation; starter/egg taps; food choices; training/light/bath/affection
   routing; and confirmation expiry/cancellation. Hardware acquisition and
@@ -245,9 +346,9 @@ rebuild with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
   game/data/asset files have no diff. No physical device tests or flashing were
   performed.
 
-Modified existing files: `TamaPoke.ino`, `pin_config.h`, `audio.cpp`,
-`rtcbat.cpp`, `rtcbat.h`, `sdmon.cpp`, `.github/workflows/ci.yml`, `.gitignore`,
-`test/Makefile`, `README.md`.
+This physical-validation pass modified `TamaPoke.ino`, `pet.cpp`, `pet.h`,
+`rtcbat.h`, both board RTC implementations, the T-Deck audio/compact UI files,
+`test/Makefile`, focused host tests, and this guide.
 
 Added files: `src/board/board.h`, `src/board/board_select.h`;
 `src/board/waveshare_amoled/{pins.h,board.cpp,audio.cpp,rtcbat.cpp}`;
@@ -255,18 +356,20 @@ Added files: `src/board/board.h`, `src/board/board_select.h`;
 `src/ui/{layout.h,layout_round466.h,layout_landscape320.h,playable_landscape.h,actions_landscape.h}`;
 `test/test_layout.cpp`, `test/test_compact.cpp`, `tools/build_firmware.py`, and
 this guide. The pre-existing `TDECK_PLUS_PORTING_ANALYSIS.md` was preserved.
+This pass additionally added `src/board/tdeck_plus/time_sync_policy.h`,
+`src/ui/time_ui.h`, and `test/test_time_sync.cpp`.
 
 Final firmware results:
 
 | Target | Compile | Application binary bytes | Static RAM reported |
 |---|---|---:|---:|
-| Waveshare | PASS | 812,098 | 33,548 |
-| T-Deck Plus | PASS | 1,319,031 | 56,296 |
+| Waveshare | PASS | 812,496 | 33,548 |
+| T-Deck Plus | PASS | 1,326,848 | 56,872 |
 
 T-Deck application SHA-256:
-`5b0cfdbf12b06cf7ca521d6b01e71e0041df75ee19ba37a46d77470a9e7b83ff`.
+`eec09bd98b4be3b9d9a70aae4e749145cf5c65b60e143636667493f3191d2eef`.
 Waveshare application SHA-256:
-`80f2b2e600811569f98bc6ea09c2ebca8f960d644762a4aae4203d4160c0f58f`.
+`c8de262221e21f3e9a7816dd466f6fbc0e9d0650d9ee2c39dc52f3954cfde188`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.
