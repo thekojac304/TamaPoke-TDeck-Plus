@@ -408,7 +408,7 @@ Final firmware results:
 | T-Deck Plus | PASS | 1,341,504 | 57,192 |
 
 T-Deck application SHA-256:
-`ec0c055cdd58dffffd5923239f3ae3777765f15976447572db0ae1f6629594df`.
+`e6fe200f221cf051436ce63e9dc19911f83081a4625ce85a7ad02240b5768d0c`.
 Waveshare application SHA-256:
 `fdd093771ce8678a7fe6132d59c718370d555de98604fbebcfcdb30a1c323346`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
