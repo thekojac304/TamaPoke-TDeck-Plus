@@ -173,8 +173,27 @@ static void renderCompactManualClock() {
   compactButton(Layout::hourMinus,"-",UI_WHITE); compactButton(Layout::hourPlus,"+",UI_WHITE);
   compactButton(Layout::minuteMinus,"-",UI_WHITE); compactButton(Layout::minutePlus,"+",UI_WHITE);
   gfx->setTextColor(Layout::secondaryText); compactText(T(S_HOUR),26,134,90,1); compactText(T(S_MIN),216,134,90,1);
-  compactButton(Layout::clockApply,"OK",UI_BAR_OK);
-  gfx->setTextColor(Layout::secondaryText); compactText(rtcTimeStatusLabel(),12,224,180,1);
+  compactButton(Layout::clockOnlyApply,"SET CLOCK ONLY",UI_BAR_OK);
+  compactButton(Layout::clockCatchup,"SET & CATCH UP",UI_BAR_WARN);
+  gfx->setTextColor(Layout::secondaryText); compactText(rtcTimeStatusLabel(),Layout::manualSource.x,Layout::manualSource.y,Layout::manualSource.w,1);
+  gfx->flush();
+}
+
+static void compactTimeText(uint32_t epoch,char *out,size_t size) {
+  snprintf(out,size,"%02lu:%02lu",(unsigned long)((epoch/3600)%24),(unsigned long)((epoch/60)%60));
+}
+
+static void renderCompactCatchupConfirm() {
+  compactScreenTitle("CONFIRM CATCH-UP");
+  char last[24],entered[24],amount[40],a[8],b[8];
+  compactTimeText(manualReferenceEpoch,a,sizeof(a)); compactTimeText(manualNewEpoch,b,sizeof(b));
+  snprintf(last,sizeof(last),"LAST KNOWN: %s",a); snprintf(entered,sizeof(entered),"NEW TIME: %s",b);
+  uint32_t mins=manualElapsedSeconds/60,gameMins=mins>14UL*24*60?14UL*24*60:mins;
+  snprintf(amount,sizeof(amount),"ADVANCE TAMAPOKE BY %luh %02lum?",(unsigned long)(gameMins/60),(unsigned long)(gameMins%60));
+  gfx->setTextColor(UI_INK); compactText(last,20,48,280,2); compactText(entered,20,76,280,2);
+  gfx->setTextColor(UI_BAR_BAD); compactText(amount,20,108,280,2);
+  if (gameMins!=mins) { gfx->setTextColor(Layout::secondaryText); compactText("2-WEEK GAMEPLAY CAP APPLIES",20,132,280,1); }
+  compactButton(Layout::catchupApply,"APPLY",UI_BAR_WARN); compactButton(Layout::catchupCancel,"CANCEL",UI_WHITE);
   gfx->flush();
 }
 
@@ -233,12 +252,14 @@ static void renderCompactClock() {
   else if (clockPage==2) renderCompactWifi();
   else if (clockPage==3) renderCompactNetworks();
   else if (clockPage==4) renderCompactWifiPassword();
+  else if (clockPage==5) renderCompactCatchupConfirm();
   else renderCompactSettings();
 }
 
 static void compactClockTap(int16_t x,int16_t y) {
   if (Layout::screenBack.contains(x,y)) {
-    if (clockPage) clockPage=0; else clockOpen=false;
+    if (clockPage==5) { rtcCancelManualCatchup(); clockPage=1; }
+    else if (clockPage) clockPage=0; else clockOpen=false;
     return;
   }
   if (clockPage==0) {
@@ -255,7 +276,13 @@ static void compactClockTap(int16_t x,int16_t y) {
   else if (Layout::hourPlus.contains(x,y)) clockH=(clockH+1)%24;
   else if (Layout::minuteMinus.contains(x,y)) clockM=(clockM+59)%60;
   else if (Layout::minutePlus.contains(x,y)) clockM=(clockM+1)%60;
-    else if (Layout::clockApply.contains(x,y)) applyClock();
+    else if (Layout::clockOnlyApply.contains(x,y)) applyClock();
+    else if (Layout::clockCatchup.contains(x,y)) previewManualCatchup();
+    return;
+  }
+  if (clockPage==5) {
+    if (Layout::catchupApply.contains(x,y)) applyManualCatchup();
+    else if (Layout::catchupCancel.contains(x,y)) { rtcCancelManualCatchup(); clockPage=1; }
     return;
   }
   if (clockPage==2) {

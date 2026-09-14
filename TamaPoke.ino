@@ -69,8 +69,9 @@ uint8_t cardPage = 0;         // 0 perfil, 1 stats+medallas
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
 int clockH = 12, clockM = 0;  // hora en edicion
 #if TAMAPOKE_TDECK_PLUS
-uint8_t clockPage = 0;        // 0 settings, 1 manual, 2 Wi-Fi, 3 networks, 4 password
+uint8_t clockPage = 0;        // 0 settings, 1 manual, 2 Wi-Fi, 3 networks, 4 password, 5 catch-up confirm
 bool timePromptOpen = false, timePromptShown = false;
+uint32_t manualReferenceEpoch = 0, manualNewEpoch = 0, manualElapsedSeconds = 0;
 char wifiSelectedSsid[33] = "", wifiPassword[65] = "";
 uint8_t wifiPasswordLen = 0;
 uint8_t wifiPasswordMode = 0; // lower, upper, symbols
@@ -1461,15 +1462,37 @@ void openManualClock() {
   clockOpen=true;
 }
 
+uint32_t enteredClockEpoch(uint32_t base) {
+  return (base / 86400) * 86400 + (uint32_t)clockH * 3600 + (uint32_t)clockM * 60;
+}
+
 void applyClock() {
   uint32_t base = pet.lastSeenEpoch ? pet.lastSeenEpoch : rtcEpoch();
-  uint32_t e = (base / 86400) * 86400 + (uint32_t)clockH * 3600 + (uint32_t)clockM * 60;
+  uint32_t e = enteredClockEpoch(base);
   rtcSetEpoch(e);
   rtcManualClockSet(e);
   uint32_t applied=rtcEpoch();
   pet.setClock(applied?applied:e);
   clockOpen = false;
 }
+
+#if TAMAPOKE_TDECK_PLUS
+void previewManualCatchup() {
+  manualReferenceEpoch=pet.savedEpoch();
+  manualNewEpoch=enteredClockEpoch(manualReferenceEpoch);
+  if (rtcPrepareManualCatchup(manualReferenceEpoch,manualNewEpoch,manualElapsedSeconds)) clockPage=5;
+}
+
+void applyManualCatchup() {
+  uint32_t reference=manualReferenceEpoch,entered=manualNewEpoch;
+  if (!rtcApplyManualCatchup(reference,entered)) return;
+  uint32_t applied=rtcEpoch();
+  pet.syncClock(applied?applied:entered);
+  Serial.printf("CLOCK manual catch-up reference=%lu entered=%lu applied_minutes=%lu\n",
+                (unsigned long)reference,(unsigned long)entered,(unsigned long)pet.lastCatchupMinutes);
+  clockOpen=false; clockPage=0;
+}
+#endif
 
 void drawClockBtn(int x, int y, const char *l) {
   gfx->fillRoundRect(x, y, 58, 58, 12, UI_WHITE);

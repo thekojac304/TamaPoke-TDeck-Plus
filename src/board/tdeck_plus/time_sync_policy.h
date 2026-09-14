@@ -29,4 +29,22 @@ struct SyncPolicy {
   }
   static bool wifiFallbackAllowed(bool enabled,bool configured) { return enabled&&configured; }
 };
+
+// A prepared manual catch-up is deliberately a two-step, one-shot operation.
+// The UI must show the exact reference/new pair before consume() can succeed.
+struct ManualCatchupPolicy {
+  uint32_t reference=0,next=0,elapsed=0;
+  bool pending=false,consumed=false;
+  bool prepare(uint32_t saved,uint32_t entered) {
+    cancel();
+    if (!validDelta(entered,saved)||entered==saved) return false;
+    reference=saved; next=entered; elapsed=entered-saved; pending=true;
+    return true;
+  }
+  bool consume(uint32_t saved,uint32_t entered) {
+    if (!pending||consumed||saved!=reference||entered!=next) return false;
+    pending=false; consumed=true; return true;
+  }
+  void cancel() { reference=next=elapsed=0; pending=false; consumed=false; }
+};
 }

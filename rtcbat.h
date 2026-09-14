@@ -11,6 +11,11 @@ bool rtcPollAuthoritative(uint32_t &wallEpoch);
 bool rtcAuthoritative();
 void rtcPersistReference(uint32_t wallEpoch);
 void rtcManualClockSet(uint32_t wallEpoch);
+bool rtcHasTrustedReference();
+bool rtcPrepareManualCatchup(uint32_t referenceWall, uint32_t newWall,
+                             uint32_t &elapsedSeconds);
+bool rtcApplyManualCatchup(uint32_t referenceWall, uint32_t newWall);
+void rtcCancelManualCatchup();
 
 enum RtcTimeSource : uint8_t { RTC_TIME_LOCAL=0, RTC_TIME_GPS, RTC_TIME_WIFI, RTC_TIME_MANUAL };
 enum RtcSyncState : uint8_t {

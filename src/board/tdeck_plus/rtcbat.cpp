@@ -16,7 +16,7 @@ constexpr uint32_t MANUAL_GPS_MS=15000,PERSIST_MS=5UL*60*1000;
 constexpr int MAX_SCAN_RESULTS=6;
 enum WifiAction:uint8_t { WIFI_NONE=0,WIFI_AUTO_NTP,WIFI_MANUAL_NTP,WIFI_CONNECT_SAVED,WIFI_CONNECT_CANDIDATE };
 
-static bool clockValid=false,mapped=false,authoritative=false,lastSyncCatchupAllowed=false;
+static bool clockValid=false,mapped=false,trusted=false,authoritative=false,lastSyncCatchupAllowed=false;
 static bool gpsSeen=false,autoStarted=false,autoFailed=false,scanning=false;
 static bool wifiOn=false,wifiConfigured=false;
 static uint32_t savedWall=0,savedUtc=0,sourceUtc=0,sourceAtMs=0,lastPersistMs=0;
@@ -27,6 +27,7 @@ static RtcTimeSource timeSource=RTC_TIME_LOCAL;
 static RtcSyncState syncState=RTC_SYNC_GPS_SEARCHING;
 static WifiAction wifiAction=WIFI_NONE;
 static TpTime::SyncPolicy policy;
+static TpTime::ManualCatchupPolicy manualCatchup;
 static char savedSsid[33]={0},savedPass[65]={0},candidateSsid[33]={0},candidatePass[65]={0};
 static char feedback[28]={0}; static uint32_t feedbackUntil=0;
 static char scanSsid[MAX_SCAN_RESULTS][33]={{0}}; static int scanRssi[MAX_SCAN_RESULTS]={0},scanCount=0;
@@ -43,9 +44,15 @@ static uint32_t wallFromUtc(uint32_t utc) {
 }
 static void persistNow(uint32_t wall,uint32_t utc) {
   if (!validEpoch(wall)) return;
-  Preferences p; p.begin("tp-clock",false); p.putUInt("wall",wall);
-  if (mapped&&validEpoch(utc)) { p.putUInt("utc",utc); p.putInt("offset",wallOffset); p.putBool("mapped",true); }
-  p.end(); lastPersistMs=millis();
+  savedWall=wall;
+  Preferences p; p.begin("tp-clock",false); p.putUInt("wall",wall); p.putBool("trusted",trusted);
+  if (mapped&&validEpoch(utc)) {
+    savedUtc=utc; p.putUInt("utc",utc); p.putInt("offset",wallOffset); p.putBool("mapped",true);
+  } else {
+    p.putBool("mapped",false); p.remove("utc"); p.remove("offset");
+  }
+  p.end();
+  lastPersistMs=millis();
 }
 static void radioOff() {
   if (scanning) { WiFi.scanDelete(); scanning=false; }
@@ -174,7 +181,7 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
     Serial.println("CLOCK unmapped local reference; using UTC without offline guess");
   }
   if (!policy.accept(source==RTC_TIME_GPS?TpTime::GPS:TpTime::WIFI,utc)) return false;
-  mapped=true; authoritative=true; lastSyncCatchupAllowed=hadMapping&&policy.consumeCatchup(); timeSource=source; syncState=RTC_SYNC_IDLE;
+  mapped=true; trusted=true; authoritative=true; lastSyncCatchupAllowed=hadMapping&&policy.consumeCatchup(); timeSource=source; syncState=RTC_SYNC_IDLE;
   sourceUtc=utc; sourceAtMs=now; savedUtc=utc; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
   if (wifiAction!=WIFI_NONE) radioOff();
   setFeedback(source==RTC_TIME_GPS?"GPS TIME OK":"WIFI TIME OK");
@@ -184,14 +191,17 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
 
 bool rtcBegin(uint32_t petSavedWall) {
   Preferences p; p.begin("tp-clock",true); savedWall=p.getUInt("wall",0); savedUtc=p.getUInt("utc",0);
-  mapped=p.getBool("mapped",false)&&validEpoch(savedWall)&&validEpoch(savedUtc); wallOffset=p.getInt("offset",0); p.end();
+  mapped=p.getBool("mapped",false)&&validEpoch(savedWall)&&validEpoch(savedUtc);
+  trusted=p.getBool("trusted",mapped)&&validEpoch(savedWall); wallOffset=p.getInt("offset",0); p.end();
   // Keep the previous tp-clock acceptance range for backward compatibility.
   if (wallOffset<-2*86400L||wallOffset>2*86400L) mapped=false;
   Preferences w; w.begin("tp-wifi",true); wifiOn=w.getBool("on",false); w.getString("ssid",savedSsid,sizeof(savedSsid)); w.getString("pass",savedPass,sizeof(savedPass)); w.end();
   wifiConfigured=savedSsid[0]; uint32_t restore=validEpoch(savedWall)?savedWall:0;
   if (petSavedWall>restore&&validEpoch(petSavedWall)) restore=petSavedWall;
   if (restore) setSystem(restore);
-  bootAtMs=millis(); syncState=RTC_SYNC_GPS_SEARCHING; gps.begin(9600,SERIAL_8N1,TDeckPins::gpsRx,TDeckPins::gpsTx);
+  bootAtMs=millis();
+  if (mapped) { sourceUtc=savedUtc; sourceAtMs=bootAtMs; }
+  syncState=RTC_SYNC_GPS_SEARCHING; gps.begin(9600,SERIAL_8N1,TDeckPins::gpsRx,TDeckPins::gpsTx);
   Serial.printf("CLOCK boot saved_wall=%lu saved_utc=%lu offset=%ld mapped=%d wifi=%s\n",
                 (unsigned long)savedWall,(unsigned long)savedUtc,(long)wallOffset,mapped?1:0,!wifiOn?"off":wifiConfigured?"configured":"not-configured");
   return true;
@@ -209,10 +219,11 @@ bool rtcPollAuthoritative(uint32_t &wallEpoch) {
 bool rtcAuthoritative() { return authoritative; }
 void rtcPersistReference(uint32_t wallEpoch) {
   if (!validEpoch(wallEpoch)||millis()-lastPersistMs<PERSIST_MS) return;
-  persistNow(wallEpoch,authoritative?currentUtc():0);
+  persistNow(wallEpoch,mapped?currentUtc():0);
 }
 void rtcManualClockSet(uint32_t wallEpoch) {
-  uint32_t utc=currentUtc(); policy.setManual(); timeSource=RTC_TIME_MANUAL; syncState=RTC_SYNC_IDLE; setFeedback("MANUAL TIME SET");
+  manualCatchup.cancel();
+  uint32_t utc=currentUtc(); policy.setManual(); trusted=true; timeSource=RTC_TIME_MANUAL; syncState=RTC_SYNC_IDLE; setFeedback("MANUAL TIME SET");
   if (authoritative&&validEpoch(utc)) {
     int64_t offset=(int64_t)wallEpoch-utc;
     // The UI edits only HH:MM. Choose the nearest real timezone day so a
@@ -221,10 +232,32 @@ void rtcManualClockSet(uint32_t wallEpoch) {
     while (offset<-12*3600L) { wallEpoch+=86400; offset+=86400; }
     wallOffset=(int32_t)offset; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
   } else {
-    mapped=false; savedUtc=0; savedWall=wallEpoch;
-    Preferences p; p.begin("tp-clock",false); p.putUInt("wall",wallEpoch); p.putBool("mapped",false); p.remove("utc"); p.remove("offset"); p.end(); lastPersistMs=millis();
+    mapped=false; savedUtc=0; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,0);
   }
 }
+bool rtcHasTrustedReference() { return trusted&&validEpoch(savedWall); }
+bool rtcPrepareManualCatchup(uint32_t referenceWall,uint32_t newWall,uint32_t &elapsedSeconds) {
+  elapsedSeconds=0;
+  if (!rtcHasTrustedReference()||!manualCatchup.prepare(referenceWall,newWall)) {
+    setFeedback(!rtcHasTrustedReference()?"NO TRUSTED TIME":newWall<=referenceWall?"TIME MUST ADVANCE":"INVALID TIME JUMP");
+    return false;
+  }
+  elapsedSeconds=manualCatchup.elapsed; return true;
+}
+bool rtcApplyManualCatchup(uint32_t referenceWall,uint32_t newWall) {
+  if (!manualCatchup.consume(referenceWall,newWall)) { setFeedback("CATCH-UP EXPIRED"); return false; }
+  policy.setManual(); trusted=true; timeSource=RTC_TIME_MANUAL; syncState=RTC_SYNC_IDLE;
+  if (mapped) {
+    int64_t utc64=(int64_t)newWall-wallOffset;
+    uint32_t utc=utc64>=MIN_VALID_EPOCH&&utc64<=MAX_VALID_EPOCH?(uint32_t)utc64:0;
+    if (!validEpoch(utc)) { setFeedback("INVALID TIME JUMP"); return false; }
+    sourceUtc=utc; sourceAtMs=millis(); setSystem(newWall); persistNow(newWall,utc);
+  } else {
+    mapped=false; savedUtc=0; setSystem(newWall); persistNow(newWall,0);
+  }
+  setFeedback("CATCH-UP APPLIED"); return true;
+}
+void rtcCancelManualCatchup() { manualCatchup.cancel(); }
 RtcTimeSource rtcTimeSource() { return timeSource; }
 RtcSyncState rtcSyncState() { return syncState; }
 const char *rtcTimeStatusLabel() {

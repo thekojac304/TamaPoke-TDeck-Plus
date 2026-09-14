@@ -65,7 +65,8 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::screenBack); fits(Layout::cardHome); fits(Layout::nicknameField);
   fits(Layout::trainButton); fits(Layout::hourMinus); fits(Layout::hourPlus);
   fits(Layout::minuteMinus); fits(Layout::minutePlus); fits(Layout::soundToggle);
-  fits(Layout::languageToggle); fits(Layout::clockApply);
+  fits(Layout::languageToggle); fits(Layout::clockOnlyApply); fits(Layout::clockCatchup);
+  fits(Layout::manualSource); fits(Layout::catchupInfo); fits(Layout::catchupApply); fits(Layout::catchupCancel);
   fits(Layout::settingsStatus); fits(Layout::syncGps); fits(Layout::syncWifi);
   fits(Layout::manualTime); fits(Layout::wifiSettings); fits(Layout::settingsFeedback);
   fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
@@ -93,5 +94,8 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   CHECK(!overlaps(Layout::settingsStatus,Layout::manualTime));
   CHECK(!overlaps(Layout::settingsStatus,Layout::soundToggle));
   CHECK(!overlaps(Layout::settingsStatus,Layout::languageToggle));
-  CHECK(!overlaps(Layout::settingsStatus,Layout::clockApply));
+  CHECK(!overlaps(Layout::manualSource,Layout::clockOnlyApply));
+  CHECK(!overlaps(Layout::manualSource,Layout::clockCatchup));
+  CHECK(!overlaps(Layout::catchupInfo,Layout::catchupApply));
+  CHECK(!overlaps(Layout::catchupApply,Layout::catchupCancel));
 }

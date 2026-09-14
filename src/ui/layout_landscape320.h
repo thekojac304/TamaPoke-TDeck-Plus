@@ -34,7 +34,9 @@ constexpr Rect wifiSettings{12,156,296,36}, settingsFeedback{12,200,296,24};
 // Manual clock page.
 constexpr Rect hourMinus{12,88,52,44}, hourPlus{68,88,52,44};
 constexpr Rect minuteMinus{200,88,52,44}, minutePlus{256,88,52,44};
-constexpr Rect clockApply{68,176,184,40};
+constexpr Rect clockOnlyApply{12,166,142,42}, clockCatchup{166,166,142,42};
+constexpr Rect manualSource{12,216,200,18};
+constexpr Rect catchupInfo{12,38,296,104}, catchupApply{24,148,272,38}, catchupCancel{24,194,272,38};
 // Minimal Wi-Fi/NTP page.
 constexpr Rect wifiToggle{12,40,92,36}, wifiNetwork{114,40,194,36};
 constexpr Rect wifiScan{12,84,92,36}, wifiConnect{114,84,92,36}, wifiForget{216,84,92,36};

@@ -21,6 +21,10 @@ bool rtcPollAuthoritative(uint32_t &) { return false; }
 bool rtcAuthoritative() { return rtcOk; }
 void rtcPersistReference(uint32_t) {}
 void rtcManualClockSet(uint32_t) {}
+bool rtcHasTrustedReference() { return false; }
+bool rtcPrepareManualCatchup(uint32_t,uint32_t,uint32_t &) { return false; }
+bool rtcApplyManualCatchup(uint32_t,uint32_t) { return false; }
+void rtcCancelManualCatchup() {}
 RtcTimeSource rtcTimeSource() { return RTC_TIME_LOCAL; }
 RtcSyncState rtcSyncState() { return RTC_SYNC_IDLE; }
 const char *rtcTimeStatusLabel() { return "TIME: LOCAL"; }

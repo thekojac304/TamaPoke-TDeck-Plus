@@ -52,3 +52,15 @@ TEST(time_sync, open_settings_fields_refresh_from_new_wall_epoch) {
   timeFieldsFromEpoch(1767269700UL,hour,minute); // 2026-01-01 12:15 UTC
   CHECK_EQ(hour,12); CHECK_EQ(minute,15);
 }
+
+TEST(time_sync, manual_catchup_requires_forward_sane_reference_and_confirmation) {
+  TpTime::ManualCatchupPolicy p;
+  uint32_t reference=1767225780UL,newTime=reference+7*3600+57*60;
+  CHECK(p.prepare(reference,newTime)); CHECK_EQ(p.elapsed,7u*3600+57u*60);
+  CHECK(!p.consume(reference,newTime+60));
+  CHECK(p.consume(reference,newTime));
+  CHECK(!p.consume(reference,newTime));
+  CHECK(!p.prepare(reference,reference));
+  CHECK(!p.prepare(reference,reference-1));
+  CHECK(!p.prepare(reference,reference+TpTime::MAX_DELTA+1));
+}

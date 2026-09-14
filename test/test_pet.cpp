@@ -909,6 +909,30 @@ TEST(offline, ajuste_manual_no_aplica_progresion) {
   p.setClock(1000u*86400+12*3600);
   CHECK_EQ(p.ageMinutes,age);
   CHECK_EQ(p.lastCatchupMinutes,0U);
+  CHECK_EQ(p.lastSeenEpoch,1000u*86400+12*3600);
+}
+
+TEST(offline, sincronizacion_autoritativa_avanza_nivel_evolucion_y_necesidades_una_vez) {
+  Pet p; makePet(p,4); setStats(p,90,90,90,90);
+  uint32_t reference=1000u*86400; p.setClock(reference);
+  CHECK_EQ(p.level(),(uint16_t)1); CHECK(!p.canEvolveNow());
+  uint32_t acquired=reference+16u*60*60;
+  p.syncClock(acquired);
+  CHECK_EQ(p.ageMinutes,16u*60); CHECK_EQ(p.level(),(uint16_t)17);
+  CHECK(!p.canEvolveNow()); // El tiempo basta, pero las necesidades bajas bloquean la evolucion.
+  setStats(p,80,80,80,80); CHECK(p.canEvolveNow());
+  CHECK_EQ(p.lastCatchupMinutes,16u*60);
+  uint32_t age=p.ageMinutes; p.syncClock(acquired); CHECK_EQ(p.ageMinutes,age);
+  CHECK_EQ(p.lastCatchupMinutes,0U);
+}
+
+TEST(offline, catchup_updates_day_reference_for_existing_daily_care_rules) {
+  Pet p; makePet(p,25); uint32_t day=1000u*86400;
+  p.setClock(day+12*3600); p.caress(); CHECK_EQ(p.streak,(uint16_t)1);
+  p.syncClock(day+2*86400+12*3600);
+  CHECK_EQ(p.lastSeenEpoch,day+2*86400+12*3600);
+  p.caress(); CHECK_EQ(p.streak,(uint16_t)1); // Existing missed-day reset rule.
+  CHECK_EQ(p.lastCareDay,(day/86400)+2);
 }
 
 // ---------------------------------------------------------------- guardado
