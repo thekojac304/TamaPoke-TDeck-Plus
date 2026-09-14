@@ -4,13 +4,72 @@ Branch: `codex/tdeck-plus-port`. This is a compile-tested bring-up candidate;
 boot, panel colors, touch alignment, shared-bus reliability, and physical save
 persistence still require a T-Deck Plus. No device was flashed during development.
 
+## 2026-09-14 physical-test follow-up (provisional)
+
+The fixes in this section build and pass host tests but are **not yet confirmed
+on hardware**. GPS, Wi-Fi, battery percentage, the settings pages, and the new
+dim step must remain provisional until the checklist below is completed.
+
+- Wi-Fi actions are now requests serviced by `rtcPollAuthoritative()` rather
+  than driver/NVS operations executed inside the touch handler. The old
+  `radioOff()` called `WiFi.disconnect(true, false)` (which deinitializes the
+  driver) and then `WiFi.mode(WIFI_OFF)` a second time; scan immediately changed
+  back to station mode in that same callback. That is the source-level reboot
+  path: a double teardown followed by immediate reinitialization can race the
+  Arduino Wi-Fi event task. The replacement performs one ordered shutdown and
+  has no delay/wait loops. A retained breadcrumb plus `esp_reset_reason()` now
+  identifies whether any remaining hardware reset is panic/watchdog/brownout
+  and the action in progress. No Wi-Fi path intentionally restarts the ESP.
+- Every Wi-Fi action logs begin/completion, free/minimum heap, largest internal
+  block, driver mode, and link status. Passwords are never logged. Missing
+  credentials return `Wi-Fi not configured`; disabled Wi-Fi does not start the
+  radio.
+- GNSS is UART1, ESP RX GPIO44, ESP TX GPIO43, 8N1, **38400 baud first**. This
+  matches WadaMesh's working T-Deck Plus target and LILYGO's u-blox M10 path.
+  LILYGO's 9600 path is for the alternate L76K. TamaPoke emits an `0xFF` wake
+  edge, waits 250 ms, and only if no checksum-valid NMEA appears probes 9600 for
+  2.5 seconds before returning to 38400. No other TamaPoke subsystem uses UART1.
+- Settings is now three landscape pages: Time (live clock/source and GPS,
+  Wi-Fi, manual actions), Wi-Fi (enable/status/scan/connect/forget/sync), and
+  System (display timeout/sound/language/battery). Manual edit and confirmed
+  catch-up remain separate pages. Rendering and hit testing use the same
+  rectangles.
+- Battery voltage follows LILYGO's hardware description: the eight-sample
+  eFuse-calibrated ADC millivolt average on GPIO4 multiplied by the exact 2:1
+  100k/100k divider. No unmeasured correction factor was added. Percentage uses
+  Meshtastic's 11-point single-cell Li-ion OCV curve, remains approximate, and
+  is shown together with voltage. EMA and two-point hysteresis remain after the
+  unsmoothed converted voltage is logged.
+
+Available firmware uses materially different conversion and percentage policy:
+
+| Firmware | ADC-to-cell conversion | Percentage policy |
+|---|---|---|
+| LILYGO official T-Deck test | Arduino calibrated `analogReadMilliVolts(GPIO4) * 2` | Displays voltage; no authoritative percentage curve |
+| WadaMesh | Eight-sample calibrated millivolts times `2.037` (the underlying meshcomod target uses `2.0`) | Linear from 3.3 V to configurable full voltage, normally 4.2 V |
+| Launcher | Calibrated millivolts times `2.0` | Linear estimate over an approximately 3.3--4.1 V range |
+| Meshtastic | ESP-IDF calibrated ADC conversion times `2.11` | 11-point 3.10--4.19 V Li-ion open-circuit curve |
+| TamaPoke (this pass) | Eight-sample calibrated millivolts times exact `2.0` | Meshtastic's 11-point curve; shown as `~%` beside voltage |
+
+TamaPoke follows LILYGO for the board voltage conversion because its exact 2:1
+divider is the hardware-authoritative baseline. It borrows only Meshtastic's
+more realistic percentage shape. Voltage-conversion confidence is medium-high
+from the design/source comparison, but it is not physically calibrated on this
+unit. Percentage confidence is low-to-medium because load, cell chemistry, and
+the lack of a fuel gauge can shift an instantaneous voltage estimate.
+- T-Deck awake brightness remains 145 (battery) or 180 (reported external
+  power). The former dim value 60 mapped to pulse step 4. The new value is
+  derived as awake/6: 24 or 30, both pulse step 2. Wake recomputes and restores
+  the exact awake value. Manual off still goes directly to step 0. Waveshare's
+  brightness code and former dim values are unchanged.
+
 ## Physical-validation audio and time fixes
 
 The compact touch router had omitted the original sound calls for starter/egg
 taps, food selection, care-button taps and petting. The ball game remained
 audible because its sound call lives in shared game logic. Those compact paths
-now emit the same existing IDs as the round UI. The T-Deck backend logs enqueue,
-start, completion and cancellation/discard, stops the current tone on mute or
+now emit the same existing IDs as the round UI. The T-Deck backend logs queued,
+started, completed and cancelled/discarded IDs, stops the current tone on mute or
 sleep, clears queued effects, and still releases I2S after each burst.
 
 The previous first authoritative sync deliberately preserved a stale legacy
@@ -41,9 +100,9 @@ over-ten-year deltas are rejected, and `syncClock()` retains its two-week gamepl
 cap. Wi-Fi/NTP work is asynchronous and the radio is disabled again after scan,
 setup, connect, success or failure.
 
-Settings now has non-overlapping `SYNC GPS`, `SYNC WIFI`, and `MANUAL` controls,
-plus a dedicated live time/source row. `WIFI TIME` provides Wi-Fi on/off, saved
-SSID, scan, connect, forget and sync controls. Scan shows the strongest nearby
+Settings now has non-overlapping Time, Wi-Fi and System pages. Time owns the live
+time/source row plus `SYNC GPS`, `SYNC WI-FI`, and `SET MANUALLY`. Wi-Fi provides
+on/off, saved SSID, scan, connect, forget and sync controls. Scan shows nearby
 networks; selection opens a touch password keyboard with lower/upper/symbol
 pages. Credentials are saved only after a successful connection.
 
@@ -73,10 +132,22 @@ as trusted when the key is absent. No existing pet NVS key changed.
 Successful GPS sync emits (numbers vary):
 
 ```text
+GPS UART initialized uart=1 rx=44 tx=43 baud=38400 wake=FF reason=tdeck-plus-default startup_ms=250
+GPS diag baud=38400 bytes_s=<n> bytes_total=<n> types=RMC/GGA/... checksum_ok=<n> rmc_ok=<n> zda_ok=<n> parsed_utc=<epoch> ubx=<0|1>
 CLOCK source=GPS acquired_utc=<epoch>
 CLOCK references saved_utc=<epoch-or-0> saved_wall=<epoch-or-0> offset=<seconds>
 CLOCK mapping current_wall=<epoch> synced_wall=<epoch> offset=<seconds>
+GPS authoritative accepted=1 utc=<epoch> catchup=<0|1>
 CLOCK game pre_sync=<epoch> post_sync=<epoch> offline_applied=<0|1> catchup_minutes=<minutes>
+```
+
+Boot and Wi-Fi action diagnostics include the readable reset class and retained
+in-progress action. A reset during a scan, for example, should begin with:
+
+```text
+RESET reason=<panic|task-watchdog|interrupt-watchdog|watchdog|brownout|software|...> code=<n> previous_wifi_action=scan nvs=<ok|open-failed>
+WIFI action=scan phase=begin heap=<bytes> min=<bytes> largest_internal=<bytes> state=<mode> status=<status>
+WIFI action=scan phase=complete heap=<bytes> min=<bytes> largest_internal=<bytes> state=<mode> status=<status>
 ```
 
 Successful NTP sync adds the connection/request lines:
@@ -257,7 +328,7 @@ once-per-minute diagnostics show calibrated ADC, doubled cell voltage, smoothed
 voltage, and estimated percentage:
 
 ```text
-BATTERY adc_mv=<divider millivolts> cell_mv=<doubled millivolts> smooth_mv=<EMA> estimated_pct=<0..100|-1>
+BATTERY raw_adc=<code> adc_mv=<pin mV> cell_mv=<adc_mv*2> formula=adc_mv*2 smooth_mv=<EMA> estimated_pct=<0..100|-1> approximate=1
 ```
 
 Charging and USB state remain deliberately unknown (`-1`) because the T-Deck
@@ -285,9 +356,10 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
   center press wakes at normal brightness; touch cannot wake the display.
   Trackball movement and normal touch activity reset the idle timer. No deep
   sleep is implemented; see `TDECK_PLUS_DEEP_SLEEP_DESIGN.md`.
-- Battery GPIO4 is sampled with the calibrated Arduino ADC API and the board's
-  100k/100k divider (2:1). Eight-sample averaging, a 7/8 EMA, two-percentage-point
-  hysteresis, and a piecewise Li-ion discharge estimate reduce flicker. Implausible
+- Battery GPIO4 is sampled at 12-bit resolution with 11 dB attenuation and the
+  calibrated Arduino millivolt API, then multiplied by the board's 100k/100k
+  divider (2:1). Eight-sample averaging, a 7/8 EMA, two-percentage-point
+  hysteresis, and Meshtastic's 11-point Li-ion OCV estimate reduce flicker. Implausible
   readings outside 3.0–4.4 V are omitted. Charging/USB state is not inferred.
 - Speaker output uses the existing synthesized 16 kHz PCM effects on I2S BCK 7,
   WS 5 and DOUT 6. Effect bursts end with zero samples and release I2S for idle
@@ -335,10 +407,11 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
    position fix. Power off for a measured interval, reboot, and verify exactly one
    catch-up. Repeat indoors with pre-existing Wi-Fi credentials for NTP, then with
    no credentials and confirm `TIME: LOCAL` plus manual Set Time remain usable.
-11. Compare GPIO4 battery diagnostics with a multimeter across charged, mid-level,
-    and low battery conditions. Confirm Home percentage is stable, Settings voltage
-    is plausible, invalid/no-battery samples show no fabricated percentage, and no
-    charging icon/state is invented.
+11. For this pass, compare `raw_adc`, `adc_mv`, `cell_mv` and `estimated_pct`
+    against the other firmware at the same resting state; a multimeter is not
+    required. Confirm Settings shows voltage plus `~%`, invalid/no-battery samples
+    fabricate neither percentage nor charging/USB state. A later meter check at
+    charged, mid-level and low states is still needed for physical calibration.
 
 ### Secondary UI physical checklist
 
@@ -372,8 +445,8 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 
 - Both final targets build with the pinned dependencies above. Waveshare reports
   812,378 bytes of sketch flash use and 33,548 bytes static RAM. T-Deck Plus
-  reports 1,341,371 bytes of sketch flash use and 57,192 bytes static RAM.
-- Host suite: **133 tests, 39,610 assertions, all passed**. Targeted coverage now
+  reports 1,344,931 bytes of sketch flash use and 57,248 bytes static RAM.
+- Host suite: **134 tests, 39,634 assertions, all passed**. Targeted coverage now
   proves Set Clock Only does not progress the pet; manual confirmed catch-up and
   GPS/Wi-Fi authoritative delivery advance age, level/evolution readiness, needs,
   and existing daily state through `syncClock()`; and each absolute catch-up can
@@ -392,25 +465,24 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
   checksum and hash. Staged T-Deck firmware sources match the working tree.
   No physical device tests or flashing were performed.
 
-This pass modified `TamaPoke.ino`, `rtcbat.h`, `src/board/board.h`, both board
-implementations' compatibility surfaces, the T-Deck pins/clock/board policies,
-the compact layout/renderers, `test/Makefile`, and focused time/layout/Pet tests.
-It added `src/board/tdeck_plus/{display_power_policy.h,battery_policy.h}`,
-`test/{test_display_power.cpp,test_battery.cpp}`, and
-`TDECK_PLUS_DEEP_SLEEP_DESIGN.md`. `TDECK_PLUS_PORTING_ANALYSIS.md`, gameplay
-data/rules, sprite assets, and the existing pet NVS schema were preserved.
+This physical-test pass modified `TDECK_PLUS_BRINGUP.md`, `TamaPoke.ino`,
+`src/board/tdeck_plus/{audio.cpp,battery_policy.h,board.cpp,display_power_policy.h,rtcbat.cpp}`,
+`src/ui/{layout_landscape320.h,secondary_landscape.h}`, and
+`test/{test_battery.cpp,test_display_power.cpp,test_layout.cpp}`. Gameplay
+data/rules, sprite assets, Waveshare behavior, and the existing pet NVS schema
+were preserved.
 
 Final firmware results:
 
 | Target | Compile | Application `.bin` bytes | Static RAM reported |
 |---|---|---:|---:|
 | Waveshare | PASS | 812,528 | 33,548 |
-| T-Deck Plus | PASS | 1,341,520 | 57,192 |
+| T-Deck Plus | PASS | 1,345,072 | 57,248 |
 
 T-Deck application SHA-256:
-`0446683e14ac9358984b4eb85562554f73a2522b9c36bd9527d776917fb4aecb`.
+`121b3cbe658e05a21496e0bc03409372f76b1c8eeaa37c35294c72c9b4f284af`.
 Waveshare application SHA-256:
-`f0a50c8579aa472db7a78f72b8f201be3f4769968eae3c31b78c36f28c20de03`.
+`b74a4118b5589545e26710938ea058d84273f4781dc2c6191239700bf82b060a`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.

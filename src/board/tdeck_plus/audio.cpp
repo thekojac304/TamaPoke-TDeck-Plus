@@ -91,12 +91,12 @@ static void playTone(uint16_t f,uint16_t ms) {
 static void playEffect(uint8_t id) {
   if (id>=SFX_COUNT || !startOutput()) return;
   gPlaying=id;
-  Serial.printf("AUDIO start id=%u name=%s\n",id,sfxName(id));
+  Serial.printf("AUDIO started id=%u name=%s\n",id,sfxName(id));
   const SfxDef &effect=SFX[id];
   for (uint8_t i=0;i<effect.len && gOn && !gSleeping;++i)
     playTone(effect.notes[i].f,effect.notes[i].ms);
   if (gOn && !gSleeping)
-    Serial.printf("AUDIO complete id=%u name=%s\n",id,sfxName(id));
+    Serial.printf("AUDIO completed id=%u name=%s\n",id,sfxName(id));
   else
     Serial.printf("AUDIO cancelled id=%u name=%s reason=%s\n",id,sfxName(id),gOn?"sleep":"muted");
   gPlaying=-1;
@@ -138,7 +138,7 @@ void sfxPlay(uint8_t id) {
     return;
   }
   if (xQueueSend(gQ,&id,0)==pdTRUE)
-    Serial.printf("AUDIO enqueue id=%u name=%s\n",id,sfxName(id));
+    Serial.printf("AUDIO queued id=%u name=%s\n",id,sfxName(id));
   else
     Serial.printf("AUDIO discarded id=%u name=%s reason=queue-full\n",id,sfxName(id));
 }
