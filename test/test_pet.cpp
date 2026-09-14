@@ -3,6 +3,7 @@
 #include "shim/Arduino.h"
 #include "../pet.h"
 #include "../dex.h"
+#include "../src/board/tdeck_plus/time_sync_policy.h"
 #include <string.h>
 
 // ---------------------------------------------------------------- helpers
@@ -924,6 +925,34 @@ TEST(offline, sincronizacion_autoritativa_avanza_nivel_evolucion_y_necesidades_u
   CHECK_EQ(p.lastCatchupMinutes,16u*60);
   uint32_t age=p.ageMinutes; p.syncClock(acquired); CHECK_EQ(p.ageMinutes,age);
   CHECK_EQ(p.lastCatchupMinutes,0U);
+}
+
+TEST(offline, gps_autoritativo_entrega_exactamente_un_catchup_al_juego) {
+  Pet p; makePet(p,4); setStats(p,90,90,90,90);
+  uint32_t reference=20000u*86400,acquired=reference+16u*60*60;
+  p.setClock(reference);
+  TpTime::SyncPolicy sync;
+  CHECK(sync.accept(TpTime::GPS,acquired));
+  if (sync.consumeCatchup()) p.syncClock(acquired);
+  CHECK_EQ(p.ageMinutes,16u*60);
+  CHECK_EQ(p.level(),(uint16_t)17);
+  CHECK_EQ(p.lastCatchupMinutes,16u*60);
+  CHECK(!sync.consumeCatchup());
+  CHECK_EQ(p.ageMinutes,16u*60);
+}
+
+TEST(offline, wifi_ntp_autoritativo_entrega_exactamente_un_catchup_al_juego) {
+  Pet p; makePet(p,4); setStats(p,90,90,90,90);
+  uint32_t reference=20000u*86400,acquired=reference+16u*60*60;
+  p.setClock(reference);
+  TpTime::SyncPolicy sync;
+  CHECK(sync.accept(TpTime::WIFI,acquired));
+  if (sync.consumeCatchup()) p.syncClock(acquired);
+  CHECK_EQ(p.ageMinutes,16u*60);
+  CHECK_EQ(p.level(),(uint16_t)17);
+  CHECK_EQ(p.lastCatchupMinutes,16u*60);
+  CHECK(!sync.consumeCatchup());
+  CHECK_EQ(p.ageMinutes,16u*60);
 }
 
 TEST(offline, catchup_updates_day_reference_for_existing_daily_care_rules) {
