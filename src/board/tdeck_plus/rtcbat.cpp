@@ -7,6 +7,8 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
+#include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <sys/time.h>
 
 // GPS/NTP supply UTC. tp-clock pairs it with the game's local-wall-shaped
@@ -16,6 +18,7 @@ constexpr uint32_t GPS_GRACE_MS=12000,WIFI_WAIT_MS=12000,NTP_WAIT_MS=15000;
 constexpr uint32_t MANUAL_GPS_MS=15000,PERSIST_MS=5UL*60*1000;
 constexpr int MAX_SCAN_RESULTS=6;
 enum WifiAction:uint8_t { WIFI_NONE=0,WIFI_AUTO_NTP,WIFI_MANUAL_NTP,WIFI_CONNECT_SAVED,WIFI_CONNECT_CANDIDATE };
+enum WifiCommand:uint8_t { WIFI_CMD_NONE=0,WIFI_CMD_ENABLE,WIFI_CMD_DISABLE,WIFI_CMD_SCAN,WIFI_CMD_CONNECT_SAVED,WIFI_CMD_CONNECT_CANDIDATE,WIFI_CMD_FORGET,WIFI_CMD_SYNC };
 
 static bool clockValid=false,mapped=false,trusted=false,authoritative=false,lastSyncCatchupAllowed=false;
 static bool gpsSeen=false,autoStarted=false,autoFailed=false,scanning=false;
@@ -27,6 +30,7 @@ static volatile bool ntpSynced=false;
 static RtcTimeSource timeSource=RTC_TIME_LOCAL;
 static RtcSyncState syncState=RTC_SYNC_GPS_SEARCHING;
 static WifiAction wifiAction=WIFI_NONE;
+static WifiCommand wifiCommand=WIFI_CMD_NONE;
 static TpTime::SyncPolicy policy;
 static TpTime::ManualCatchupPolicy manualCatchup;
 static char savedSsid[33]={0},savedPass[65]={0},candidateSsid[33]={0},candidatePass[65]={0};
@@ -34,6 +38,30 @@ static char feedback[28]={0}; static uint32_t feedbackUntil=0;
 static char scanSsid[MAX_SCAN_RESULTS][33]={{0}}; static int scanRssi[MAX_SCAN_RESULTS]={0},scanCount=0;
 static HardwareSerial gps(1);
 static char nmea[112]; static uint8_t nmeaLen=0;
+static constexpr uint32_t WIFI_BREADCRUMB_MAGIC=0x54505749UL;
+RTC_NOINIT_ATTR static uint32_t wifiBreadcrumbMagic;
+RTC_NOINIT_ATTR static uint32_t wifiBreadcrumbAction;
+
+static const char *wifiCommandName(WifiCommand command) {
+  switch (command) {
+    case WIFI_CMD_ENABLE:return "enable"; case WIFI_CMD_DISABLE:return "disable";
+    case WIFI_CMD_SCAN:return "scan"; case WIFI_CMD_CONNECT_SAVED:return "connect-saved";
+    case WIFI_CMD_CONNECT_CANDIDATE:return "connect-candidate"; case WIFI_CMD_FORGET:return "forget";
+    case WIFI_CMD_SYNC:return "ntp-sync"; default:return "none";
+  }
+}
+static void wifiDiag(const char *phase,const char *action) {
+  Serial.printf("WIFI action=%s phase=%s heap=%lu min=%lu largest_internal=%u state=%d status=%d\n",
+                action,phase,(unsigned long)ESP.getFreeHeap(),(unsigned long)ESP.getMinFreeHeap(),
+                heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),(int)WiFi.getMode(),(int)WiFi.status());
+}
+static void markWifiAction(const char *action,WifiCommand command) {
+  wifiBreadcrumbMagic=WIFI_BREADCRUMB_MAGIC; wifiBreadcrumbAction=(uint32_t)command;
+  wifiDiag("begin",action);
+}
+static void clearWifiAction(const char *action) {
+  wifiDiag("complete",action); wifiBreadcrumbAction=WIFI_CMD_NONE;
+}
 
 static bool validEpoch(uint32_t e) { return e>=MIN_VALID_EPOCH&&e<=MAX_VALID_EPOCH; }
 static void setFeedback(const char *text) { snprintf(feedback,sizeof(feedback),"%s",text?text:""); feedbackUntil=millis()+3500; }
@@ -55,10 +83,15 @@ static void persistNow(uint32_t wall,uint32_t utc) {
   p.end();
   lastPersistMs=millis();
 }
-static void radioOff() {
-  if (scanning) { WiFi.scanDelete(); scanning=false; }
-  esp_sntp_stop(); WiFi.disconnect(true,false); WiFi.mode(WIFI_OFF);
+static void radioOff(const char *reason) {
+  // disconnect(true) already deinitializes Wi-Fi. The old code immediately
+  // called mode(WIFI_OFF) as well and, for scans, reinitialized it in the same
+  // UI callback. That double teardown/restart races the Arduino event task.
+  // Keep teardown single-shot and perform every transition from rtcPoll.
+  esp_sntp_stop();
+  if (WiFi.getMode()!=WIFI_OFF) { WiFi.disconnect(false,false); WiFi.mode(WIFI_OFF); }
   wifiStartedAt=ntpStartedAt=0; ntpSynced=false; wifiAction=WIFI_NONE;
+  Serial.printf("WIFI radio=off reason=%s\n",reason?reason:"idle");
 }
 static int64_t daysFromCivil(int y,unsigned m,unsigned d) {
   y-=m<=2; const int era=(y>=0?y:y-399)/400; const unsigned yoe=(unsigned)(y-era*400);
@@ -117,39 +150,75 @@ static void onNtpSync(timeval *) { ntpSynced=true; }
 static bool beginWifi(WifiAction action,const char *ssid,const char *pass) {
   if (!wifiOn) { setFeedback("WIFI OFF"); return false; }
   if (!ssid||!ssid[0]) { setFeedback("WIFI NOT CONFIGURED"); return false; }
-  if (scanning) { WiFi.scanDelete(); scanning=false; }
-  WiFi.mode(WIFI_STA); WiFi.disconnect(false,false); delay(1); WiFi.begin(ssid,pass?pass:"");
+  if (scanning) { setFeedback("WIFI BUSY"); return false; }
+  WiFi.mode(WIFI_STA); WiFi.disconnect(false,false); WiFi.begin(ssid,pass?pass:"");
   wifiAction=action; wifiStartedAt=millis(); ntpStartedAt=0; ntpSynced=false; syncState=RTC_SYNC_WIFI_CONNECTING;
   Serial.printf("CLOCK Wi-Fi connect purpose=%s credentials=tp-wifi\n",
                 action==WIFI_AUTO_NTP?"auto-ntp":action==WIFI_MANUAL_NTP?"manual-ntp":"setup");
   return true;
 }
 static void saveCandidate() {
-  Preferences p; p.begin("tp-wifi",false); p.putBool("on",true); p.putString("ssid",candidateSsid); p.putString("pass",candidatePass); p.end();
+  Preferences p; if (!p.begin("tp-wifi",false)) { Serial.println("WIFI NVS save failed begin"); setFeedback("WIFI SAVE FAILED"); return; }
+  p.putBool("on",true); p.putString("ssid",candidateSsid); p.putString("pass",candidatePass); p.end();
   snprintf(savedSsid,sizeof(savedSsid),"%s",candidateSsid); snprintf(savedPass,sizeof(savedPass),"%s",candidatePass); wifiConfigured=true;
 }
 static void failWifi(const char *message) {
   bool automatic=wifiAction==WIFI_AUTO_NTP;
-  Serial.printf("CLOCK Wi-Fi/NTP failed reason=%s\n",message); radioOff(); setFeedback(message);
+  const char *action=automatic?"auto-ntp":wifiAction==WIFI_MANUAL_NTP?"ntp-sync":
+                     wifiAction==WIFI_CONNECT_CANDIDATE?"connect-candidate":"connect-saved";
+  Serial.printf("CLOCK Wi-Fi/NTP failed reason=%s\n",message); radioOff(message); setFeedback(message);
   if (automatic) { autoFailed=true; syncState=RTC_SYNC_FAILED; Serial.printf("CLOCK automatic sync failed gps=%s wifi=%s\n",gpsSeen?"no-time":"no-data",message); }
   else syncState=policy.delivered?RTC_SYNC_IDLE:RTC_SYNC_FAILED;
+  clearWifiAction(action);
 }
 static void pollScan() {
   if (!scanning) return;
   int found=WiFi.scanComplete(); if (found==WIFI_SCAN_RUNNING) return;
   scanning=false; scanCount=0;
-  if (found<0) { setFeedback("WIFI SCAN FAILED"); WiFi.scanDelete(); radioOff(); return; }
+  if (found<0) { setFeedback("WIFI SCAN FAILED"); WiFi.scanDelete(); radioOff("scan-failed"); clearWifiAction("scan"); return; }
   for (int i=0;i<found&&scanCount<MAX_SCAN_RESULTS;++i) {
     String ssid=WiFi.SSID(i); if (!ssid.length()) continue;
     snprintf(scanSsid[scanCount],sizeof(scanSsid[scanCount]),"%s",ssid.c_str()); scanRssi[scanCount++]=WiFi.RSSI(i);
   }
-  WiFi.scanDelete(); radioOff(); setFeedback(scanCount?"SELECT NETWORK":"NO NETWORKS");
+  WiFi.scanDelete(); radioOff("scan-complete"); setFeedback(scanCount?"SELECT NETWORK":"NO NETWORKS"); clearWifiAction("scan");
+}
+static void queueWifi(WifiCommand command) {
+  if (wifiCommand!=WIFI_CMD_NONE) Serial.printf("WIFI action=%s phase=replaced previous=%s\n",wifiCommandName(command),wifiCommandName(wifiCommand));
+  wifiCommand=command;
+}
+static void serviceWifiCommand() {
+  if (wifiCommand==WIFI_CMD_NONE||wifiAction!=WIFI_NONE||scanning) return;
+  WifiCommand command=wifiCommand; wifiCommand=WIFI_CMD_NONE; const char *name=wifiCommandName(command); markWifiAction(name,command);
+  if (command==WIFI_CMD_ENABLE||command==WIFI_CMD_DISABLE) {
+    Preferences p; bool ok=p.begin("tp-wifi",false); if (ok) { p.putBool("on",wifiOn); p.end(); }
+    if (!wifiOn) radioOff("disabled"); setFeedback(wifiOn?"WIFI ON":"WIFI OFF");
+    if (!ok) { Serial.println("WIFI NVS enabled-state write failed"); setFeedback("WIFI SAVE FAILED"); }
+    clearWifiAction(name); return;
+  }
+  if (command==WIFI_CMD_FORGET) {
+    radioOff("forget"); Preferences p; bool ok=p.begin("tp-wifi",false);
+    if (ok) { p.remove("ssid"); p.remove("pass"); p.end(); }
+    setFeedback(ok?"WIFI FORGOTTEN":"WIFI SAVE FAILED"); clearWifiAction(name); return;
+  }
+  if (!wifiOn) { setFeedback("WIFI OFF"); clearWifiAction(name); return; }
+  if (command==WIFI_CMD_SCAN) {
+    WiFi.mode(WIFI_STA); scanCount=0; int result=WiFi.scanNetworks(true,true); scanning=result==WIFI_SCAN_RUNNING;
+    Serial.printf("WIFI action=scan phase=requested result=%d\n",result);
+    if (!scanning) { setFeedback("WIFI SCAN FAILED"); radioOff("scan-start-failed"); clearWifiAction(name); }
+    else setFeedback("WIFI SCANNING");
+    return;
+  }
+  WifiAction action=command==WIFI_CMD_CONNECT_CANDIDATE?WIFI_CONNECT_CANDIDATE:
+                    command==WIFI_CMD_CONNECT_SAVED?WIFI_CONNECT_SAVED:WIFI_MANUAL_NTP;
+  const char *ssid=command==WIFI_CMD_CONNECT_CANDIDATE?candidateSsid:savedSsid;
+  const char *pass=command==WIFI_CMD_CONNECT_CANDIDATE?candidatePass:savedPass;
+  if (!beginWifi(action,ssid,pass)) clearWifiAction(name);
 }
 static void pollWifi(uint32_t now) {
-  pollScan(); if (wifiAction==WIFI_NONE) return;
+  pollScan(); serviceWifiCommand(); if (wifiAction==WIFI_NONE) return;
   if (!ntpStartedAt&&WiFi.status()==WL_CONNECTED) {
-    if (wifiAction==WIFI_CONNECT_CANDIDATE) { saveCandidate(); setFeedback("WIFI SAVED"); syncState=RTC_SYNC_IDLE; radioOff(); return; }
-    if (wifiAction==WIFI_CONNECT_SAVED) { setFeedback("WIFI CONNECTED"); syncState=RTC_SYNC_IDLE; radioOff(); return; }
+    if (wifiAction==WIFI_CONNECT_CANDIDATE) { saveCandidate(); setFeedback("WIFI SAVED"); syncState=RTC_SYNC_IDLE; radioOff("candidate-saved"); clearWifiAction("connect-candidate"); return; }
+    if (wifiAction==WIFI_CONNECT_SAVED) { setFeedback("WIFI CONNECTED"); syncState=RTC_SYNC_IDLE; radioOff("connection-verified"); clearWifiAction("connect-saved"); return; }
     ntpStartedAt=now; wallBeforeNtp=rtcEpoch(); syncState=RTC_SYNC_NTP_WAITING;
     sntp_set_time_sync_notification_cb(onNtpSync); configTime(0,0,"pool.ntp.org","time.cloudflare.com");
     Serial.println("CLOCK source=WIFI NTP requested");
@@ -160,7 +229,10 @@ static void pollWifi(uint32_t now) {
 static void startAutomaticFallback(uint32_t now) {
   if (policy.delivered||autoStarted||now-bootAtMs<GPS_GRACE_MS) return;
   autoStarted=true;
-  if (TpTime::SyncPolicy::wifiFallbackAllowed(wifiOn,wifiConfigured)) beginWifi(WIFI_AUTO_NTP,savedSsid,savedPass);
+  if (TpTime::SyncPolicy::wifiFallbackAllowed(wifiOn,wifiConfigured)) {
+    markWifiAction("auto-ntp",WIFI_CMD_SYNC);
+    if (!beginWifi(WIFI_AUTO_NTP,savedSsid,savedPass)) clearWifiAction("auto-ntp");
+  }
   else { autoFailed=true; syncState=RTC_SYNC_FAILED; Serial.printf("CLOCK automatic sync failed gps=%s wifi=%s\n",gpsSeen?"no-time":"no-data",wifiOn?"not-configured":"disabled"); }
 }
 static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t &wallEpoch) {
@@ -184,7 +256,7 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
   if (!policy.accept(source==RTC_TIME_GPS?TpTime::GPS:TpTime::WIFI,utc)) return false;
   mapped=true; trusted=true; authoritative=true; lastSyncCatchupAllowed=hadMapping&&policy.consumeCatchup(); timeSource=source; syncState=RTC_SYNC_IDLE;
   sourceUtc=utc; sourceAtMs=now; savedUtc=utc; savedWall=wallEpoch; setSystem(wallEpoch); persistNow(wallEpoch,utc);
-  if (wifiAction!=WIFI_NONE) radioOff();
+  if (wifiAction!=WIFI_NONE) { radioOff("time-synced"); clearWifiAction("ntp-sync"); }
   setFeedback(source==RTC_TIME_GPS?"GPS TIME OK":"WIFI TIME OK");
   Serial.printf("CLOCK mapping current_wall=%lu synced_wall=%lu offset=%ld\n",(unsigned long)currentWall,(unsigned long)wallEpoch,(long)wallOffset);
   return true;
@@ -196,7 +268,7 @@ bool rtcBegin(uint32_t petSavedWall) {
   trusted=p.getBool("trusted",mapped)&&validEpoch(savedWall); wallOffset=p.getInt("offset",0); p.end();
   // Keep the previous tp-clock acceptance range for backward compatibility.
   if (wallOffset<-2*86400L||wallOffset>2*86400L) mapped=false;
-  Preferences w; w.begin("tp-wifi",true); wifiOn=w.getBool("on",false); w.getString("ssid",savedSsid,sizeof(savedSsid)); w.getString("pass",savedPass,sizeof(savedPass)); w.end();
+  Preferences w; bool wifiNvs=w.begin("tp-wifi",true); if (wifiNvs) { wifiOn=w.getBool("on",false); w.getString("ssid",savedSsid,sizeof(savedSsid)); w.getString("pass",savedPass,sizeof(savedPass)); w.end(); }
   wifiConfigured=savedSsid[0]; uint32_t restore=validEpoch(savedWall)?savedWall:0;
   if (petSavedWall>restore&&validEpoch(petSavedWall)) restore=petSavedWall;
   if (restore) setSystem(restore);
@@ -205,6 +277,10 @@ bool rtcBegin(uint32_t petSavedWall) {
   syncState=RTC_SYNC_GPS_SEARCHING; gps.begin(9600,SERIAL_8N1,TDeckPins::gpsRx,TDeckPins::gpsTx);
   Serial.printf("CLOCK boot saved_wall=%lu saved_utc=%lu offset=%ld mapped=%d wifi=%s\n",
                 (unsigned long)savedWall,(unsigned long)savedUtc,(long)wallOffset,mapped?1:0,!wifiOn?"off":wifiConfigured?"configured":"not-configured");
+  Serial.printf("RESET reason=%d previous_wifi_action=%s nvs=%s\n",(int)esp_reset_reason(),
+                wifiBreadcrumbMagic==WIFI_BREADCRUMB_MAGIC?wifiCommandName((WifiCommand)wifiBreadcrumbAction):"unknown",
+                wifiNvs?"ok":"open-failed");
+  wifiBreadcrumbMagic=WIFI_BREADCRUMB_MAGIC; wifiBreadcrumbAction=WIFI_CMD_NONE;
   return true;
 }
 uint32_t rtcEpoch() { return clockValid?(uint32_t)time(nullptr):0; }
@@ -273,34 +349,34 @@ void rtcRequestGpsSync() {
 }
 void rtcRequestWifiSync() {
   if (policy.delivered) { setFeedback(timeSource==RTC_TIME_WIFI?"WIFI TIME OK":"TIME ALREADY SYNCED"); return; }
-  beginWifi(WIFI_MANUAL_NTP,savedSsid,savedPass);
+  if (!wifiConfigured) { setFeedback("WIFI NOT CONFIGURED"); Serial.println("WIFI action=ntp-sync phase=rejected reason=not-configured"); return; }
+  queueWifi(WIFI_CMD_SYNC);
 }
 bool rtcWifiEnabled() { return wifiOn; }
 bool rtcWifiConfigured() { return wifiConfigured; }
 const char *rtcWifiSsid() { return savedSsid; }
 void rtcWifiSetEnabled(bool enabled) {
-  wifiOn=enabled; Preferences p; p.begin("tp-wifi",false); p.putBool("on",enabled); p.end();
-  if (!enabled) radioOff(); setFeedback(enabled?"WIFI ON":"WIFI OFF");
+  wifiOn=enabled; queueWifi(enabled?WIFI_CMD_ENABLE:WIFI_CMD_DISABLE); setFeedback(enabled?"WIFI ENABLING":"WIFI DISABLING");
 }
 void rtcWifiForget() {
-  radioOff(); savedSsid[0]=savedPass[0]=0; wifiConfigured=false;
-  Preferences p; p.begin("tp-wifi",false); p.remove("ssid"); p.remove("pass"); p.end(); setFeedback("WIFI FORGOTTEN");
+  savedSsid[0]=savedPass[0]=0; wifiConfigured=false; queueWifi(WIFI_CMD_FORGET); setFeedback("FORGETTING WIFI");
 }
 bool rtcWifiStartScan() {
   if (!wifiOn) { setFeedback("WIFI OFF"); return false; }
-  radioOff(); WiFi.mode(WIFI_STA); scanCount=0; int result=WiFi.scanNetworks(true,true); scanning=result==WIFI_SCAN_RUNNING;
-  if (!scanning) { setFeedback("WIFI SCAN FAILED"); radioOff(); return false; }
-  setFeedback("WIFI SCANNING"); return true;
+  queueWifi(WIFI_CMD_SCAN); setFeedback("WIFI SCAN QUEUED"); return true;
 }
 bool rtcWifiScanning() { return scanning; }
 int rtcWifiScanCount() { return scanCount; }
 const char *rtcWifiScanSsid(int index) { return index>=0&&index<scanCount?scanSsid[index]:""; }
 int rtcWifiScanRssi(int index) { return index>=0&&index<scanCount?scanRssi[index]:0; }
-bool rtcWifiConnectSaved() { return beginWifi(WIFI_CONNECT_SAVED,savedSsid,savedPass); }
+bool rtcWifiConnectSaved() {
+  if (!wifiConfigured) { setFeedback("WIFI NOT CONFIGURED"); Serial.println("WIFI action=connect-saved phase=rejected reason=not-configured"); return false; }
+  queueWifi(WIFI_CMD_CONNECT_SAVED); setFeedback("WIFI CONNECT QUEUED"); return true;
+}
 bool rtcWifiConnectCandidate(const char *ssid,const char *password) {
   if (!ssid||!ssid[0]) return false;
   snprintf(candidateSsid,sizeof(candidateSsid),"%s",ssid); snprintf(candidatePass,sizeof(candidatePass),"%s",password?password:"");
-  return beginWifi(WIFI_CONNECT_CANDIDATE,candidateSsid,candidatePass);
+  queueWifi(WIFI_CMD_CONNECT_CANDIDATE); setFeedback("WIFI CONNECT QUEUED"); return true;
 }
 
 static int batteryMv=0,batteryPct=-1,batteryAdcMv=0;
