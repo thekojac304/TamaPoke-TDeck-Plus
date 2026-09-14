@@ -35,6 +35,20 @@ static void compactStatRow(int y,const char *label,uint16_t value,uint16_t maxVa
   if (fill>1) gfx->fillRoundRect(bx,y+1,fill,9,3,color);
 }
 
+static void compactProfileStat(int y,const char *label,uint16_t value,uint16_t maxValue,uint16_t color) {
+  // The portrait owns x=6..119. Keep every part of this row in the right-hand
+  // information column, including the progress track.
+  constexpr int x=132, w=176;
+  gfx->setTextColor(UI_INK);
+  compactText(label,x,y,120,1);
+  char number[8]; snprintf(number,sizeof(number),"%u",value);
+  compactText(number,276,y,32,1);
+  int fill=(int)value*w/maxValue;
+  if (fill>w) fill=w;
+  gfx->fillRoundRect(x,y+13,w,9,3,UI_TRACK);
+  if (fill>1) gfx->fillRoundRect(x,y+13,fill,9,3,color);
+}
+
 static void renderCompactProfile() {
   const DexEntry &d=DEX_TBL[pet.speciesId];
   compactScreenTitle("PROFILE");
@@ -51,15 +65,15 @@ static void renderCompactProfile() {
   compactButton(Layout::nicknameField,head,UI_WHITE);
   if (pet.nick[0]) {
     char species[32]; snprintf(species,sizeof(species),"(%s)",dexName(pet.speciesId));
-    gfx->setTextColor(UI_TRACK); compactText(species,132,76,176,1);
+    gfx->setTextColor(Layout::secondaryText); compactText(species,132,76,176,1);
   }
   char streak[36]; snprintf(streak,sizeof(streak),T(S_STREAK_FMT),pet.streak,pet.bestStreak);
   gfx->setTextColor(UI_INK); compactText(streak,132,96,176,1);
-  compactStatRow(116,T(S_VIN),pet.bond,100,C565(0xd4,0x52,0x7e));
+  compactProfileStat(116,T(S_VIN),pet.bond,100,C565(0xd4,0x52,0x7e));
   const char *berry=!pet.berryKnown?T(S_BERRY_UNK):pet.lovesBerry(0)?T(S_BERRY_RED):pet.lovesBerry(1)?T(S_BERRY_BLUE):T(S_BERRY_GREEN);
   char info[48]; snprintf(info,sizeof(info),T(S_INFO_FMT),berry,(unsigned long)(pet.ageMinutes/1440));
-  compactText(info,132,138,176,1);
-  gfx->setTextColor(UI_TRACK); compactText(T(S_RENAME_HINT),132,176,176,1);
+  gfx->setTextColor(UI_INK); compactText(info,132,148,176,1);
+  gfx->setTextColor(Layout::secondaryText); compactText(T(S_RENAME_HINT),132,178,176,1);
   compactCardChrome(); gfx->flush();
 }
 
@@ -99,7 +113,7 @@ static void renderCompactProgress() {
   if (fw) gfx->fillRoundRect(14,84,fw,12,4,UI_BAR_OK);
   char next[32]; snprintf(next,sizeof(next),T(S_NEXT_LVL_FMT),MINUTES_PER_LEVEL-into,pet.level()+1);
   compactText(next,12,104,296,1);
-  gfx->setTextColor(UI_TRACK); compactText(T(S_EVO_LABEL),12,128,90,1);
+  gfx->setTextColor(Layout::secondaryText); compactText(T(S_EVO_LABEL),12,128,90,1);
   char evoBuf[32]; const char *evo; uint16_t evoColor=UI_INK;
   if (!d.evolvesTo) evo=T(S_FINAL_FORM);
   else {
@@ -135,13 +149,13 @@ static void renderCompactClock() {
   gfx->setTextColor(UI_INK); compactText(timeText,100,40,120,4);
   compactButton(Layout::hourMinus,"-",UI_WHITE); compactButton(Layout::hourPlus,"+",UI_WHITE);
   compactButton(Layout::minuteMinus,"-",UI_WHITE); compactButton(Layout::minutePlus,"+",UI_WHITE);
-  gfx->setTextColor(UI_TRACK); compactText(T(S_HOUR),26,134,90,1); compactText(T(S_MIN),216,134,90,1);
+  gfx->setTextColor(Layout::secondaryText); compactText(T(S_HOUR),26,134,90,1); compactText(T(S_MIN),216,134,90,1);
   compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
   char lang[16]; snprintf(lang,sizeof(lang),"%s: %s >",T(S_LANG_LABEL),LANG_CODES[gLang]);
   compactButton(Layout::languageToggle,lang,UI_WHITE);
   compactButton(Layout::clockApply,"OK",UI_BAR_OK);
   char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
-  gfx->setTextColor(UI_TRACK); compactText(ver,276,220,40,1);
+  gfx->setTextColor(Layout::secondaryText); compactText(ver,276,220,40,1);
   gfx->flush();
 }
 
@@ -216,7 +230,7 @@ static void renderCompactGallery() {
     gfx->drawRect(cell.x,cell.y,cell.w,cell.h,UI_TRACK);
     const uint8_t *thumb=thumbs.get(dex);
     if (thumb) compactDrawThumb(thumb,cell,1,!pet.isRegistered(dex));
-    else { char number[8]; snprintf(number,sizeof(number),"%u",(unsigned)dex); gfx->setTextColor(UI_TRACK); compactCentered(number,cell,1); }
+    else { char number[8]; snprintf(number,sizeof(number),"%u",(unsigned)dex); gfx->setTextColor(Layout::secondaryText); compactCentered(number,cell,1); }
     if (pet.isShinyRegistered(dex)) { gfx->setTextColor(UI_BAR_WARN); compactText("*",cell.x+cell.w-10,cell.y+3,8,1); }
   }
   compactButton(Layout::galleryPrev,"<",galleryPage?UI_WHITE:UI_TRACK);

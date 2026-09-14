@@ -81,12 +81,16 @@ void renderCompact() {
     for (int i=0;i<4;++i) {
       const auto &r=Layout::needs[i];
       int y=r.y;
+      // compactButton() leaves the ink dark. Restore a panel-appropriate ink
+      // explicitly: the old inherited colour was nearly invisible at night.
+      gfx->setTextColor(gNight ? UI_INK_NIGHT : UI_INK);
       compactText(labels[i],r.x,y,r.w-31);
       char number[5]; snprintf(number,sizeof(number),"%u",values[i]);
       compactText(number,r.x+r.w-23,y,27);
       gfx->fillRect(r.x,y+12,r.w,6,UI_TRACK);
       gfx->fillRect(r.x,y+12,r.w*values[i]/100,6,values[i]<30 ? UI_BAR_BAD : UI_BAR_OK);
     }
+    gfx->setTextColor(gNight ? UI_INK_NIGHT : UI_INK);
     compactText(statusMsg(),Layout::status.x,Layout::status.y,Layout::status.w);
     for (int i=0;i<4;++i) {
       const auto &r=Layout::care[i]; compactButton(r,"",pet.sleeping && i!=2 ? UI_TRACK : UI_WHITE);

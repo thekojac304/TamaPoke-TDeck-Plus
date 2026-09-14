@@ -1,5 +1,8 @@
 // A tall scene on the left fits every current PMD frame at 1x.
 constexpr bool compact = true;
+// T-Deck LCD-specific text tones. Keep these local to the compact UI so the
+// Waveshare AMOLED palette and appearance remain unchanged.
+constexpr uint16_t secondaryText = 0x630C; // #606064: readable on UI_BG_DAY
 constexpr int centerX = 104, centerY = 120, petY = 112, ground = 194;
 constexpr int swipe = 45;
 constexpr Rect scene{0, 24, 208, 174};
