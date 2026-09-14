@@ -2,7 +2,10 @@
 // Compact touch routing; uses the existing Pet API without new game rules.
 void compactTap(int16_t x, int16_t y) {
   if (pet.awaitingStarter()) {
-    for (int i=0;i<3;++i) if (Layout::starter[i].contains(x,y)) pet.chooseStarter(STARTER_DEX[i]);
+    for (int i=0;i<3;++i) if (Layout::starter[i].contains(x,y)) {
+      pet.chooseStarter(STARTER_DEX[i]);
+      sfxPlay(SFX_TAP);
+    }
     return;
   }
   if (galleryOpen) { compactGalleryTap(x,y); return; }
@@ -32,10 +35,11 @@ void compactTap(int16_t x, int16_t y) {
   if (feedMenuUntil) {
     if (timeLeft(feedMenuUntil)) for (int i=0;i<4;++i) if (Layout::food[i].contains(x,y)) {
       if (i==3) pet.feedCandy(); else pet.feedBerry(i);
+      sfxPlay(SFX_EAT);
     }
     feedMenuUntil=0; return;
   }
-  if (pet.isEgg()) { pet.eggTap(); return; }
+  if (pet.isEgg()) { pet.eggTap(); sfxPlay(SFX_TAP); return; }
   if (Layout::homeProfile.contains(x,y)) { cardOpen=true; cardPage=0; return; }
   if (Layout::homeDex.contains(x,y)) {
     galleryOpen=true; galleryPage=0; galleryDetail=0; galleryDirty=true; return;
@@ -47,11 +51,15 @@ void compactTap(int16_t x, int16_t y) {
     if (pet.wantFarewellButton()) { choiceKind=2; choiceUntil=millis()+12000; return; }
   }
   for (int i=0;i<4;++i) if (Layout::care[i].contains(x,y)) {
+    sfxPlay(SFX_TAP);
     if (i==0 && !pet.sleeping) feedMenuUntil=millis()+6000;
     else if (i==1) startGame();
     else if (i==2) pet.toggleLight();
     else if (i==3) startBath();
     return;
   }
-  if (inPetZone(x,y)) pet.caress();
+  if (inPetZone(x,y)) {
+    pet.caress();
+    if (!pet.sleeping) sfxPlay(SFX_HEART);
+  }
 }

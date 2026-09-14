@@ -12,6 +12,14 @@ constexpr uint32_t SAMPLE_RATE = 16000;
 static I2SClass i2s;
 static QueueHandle_t gQ = nullptr;
 static bool gOn = true, gSleeping = false, gFailed = false, gActive = false;
+static volatile int gPlaying = -1;
+
+static const char *sfxName(uint8_t id) {
+  static const char *const names[SFX_COUNT] = {
+    "TAP","EAT","PLAY","HEART","HATCH","EVOLVE","MEDAL","DENY","BYE","LEVEL"
+  };
+  return id<SFX_COUNT ? names[id] : "INVALID";
+}
 
 struct Note { uint16_t f, ms; };
 static const Note N_TAP[]    = {{880,35}};
@@ -82,9 +90,16 @@ static void playTone(uint16_t f,uint16_t ms) {
 
 static void playEffect(uint8_t id) {
   if (id>=SFX_COUNT || !startOutput()) return;
+  gPlaying=id;
+  Serial.printf("AUDIO start id=%u name=%s\n",id,sfxName(id));
   const SfxDef &effect=SFX[id];
   for (uint8_t i=0;i<effect.len && gOn && !gSleeping;++i)
     playTone(effect.notes[i].f,effect.notes[i].ms);
+  if (gOn && !gSleeping)
+    Serial.printf("AUDIO complete id=%u name=%s\n",id,sfxName(id));
+  else
+    Serial.printf("AUDIO cancelled id=%u name=%s reason=%s\n",id,sfxName(id),gOn?"sleep":"muted");
+  gPlaying=-1;
 }
 
 static void audioTask(void *) {
@@ -117,13 +132,24 @@ void audioBegin() {
 }
 
 void sfxPlay(uint8_t id) {
-  if (gQ && gOn && !gSleeping && !gFailed && id<SFX_COUNT)
-    xQueueSend(gQ,&id,0);
+  if (!gQ || !gOn || gSleeping || gFailed || id>=SFX_COUNT) {
+    Serial.printf("AUDIO discarded id=%u name=%s reason=%s\n",id,sfxName(id),
+                  !gOn?"muted":gSleeping?"sleep":gFailed?"backend":"invalid");
+    return;
+  }
+  if (xQueueSend(gQ,&id,0)==pdTRUE)
+    Serial.printf("AUDIO enqueue id=%u name=%s\n",id,sfxName(id));
+  else
+    Serial.printf("AUDIO discarded id=%u name=%s reason=queue-full\n",id,sfxName(id));
 }
 
 void audioSetEnabled(bool on) {
   gOn=on;
-  if (!on && gQ) xQueueReset(gQ);
+  if (!on && gQ) {
+    UBaseType_t queued=uxQueueMessagesWaiting(gQ);
+    xQueueReset(gQ);
+    Serial.printf("AUDIO cancelled current=%d queued=%u reason=muted\n",gPlaying,(unsigned)queued);
+  }
   Preferences prefs;
   prefs.begin("tamapoke",false);
   prefs.putBool("snd",on);
@@ -135,6 +161,11 @@ bool audioEnabled() { return gOn; }
 void audioSetSleeping(bool sleeping) {
   if (gSleeping==sleeping) return;
   gSleeping=sleeping;
-  if (sleeping && gQ) xQueueReset(gQ);
+  if (sleeping && gQ) {
+    UBaseType_t queued=uxQueueMessagesWaiting(gQ);
+    xQueueReset(gQ);
+    if (gPlaying>=0 || queued)
+      Serial.printf("AUDIO cancelled current=%d queued=%u reason=sleep\n",gPlaying,(unsigned)queued);
+  }
 }
 #endif

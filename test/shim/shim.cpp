@@ -57,7 +57,8 @@ void MockSerial::begin(unsigned long) {}
 // ---------------- audio (stubs) ----------------
 static bool gAudioOn = true;
 void audioBegin() {}
-void sfxPlay(uint8_t) {}
+extern std::vector<uint8_t> sounds;
+void sfxPlay(uint8_t id) { sounds.push_back(id); }
 void audioSetEnabled(bool on) { gAudioOn = on; }
 bool audioEnabled() { return gAudioOn; }
 

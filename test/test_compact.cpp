@@ -1,8 +1,10 @@
 #include "framework.h"
 #include "shim/Arduino.h"
 #include "../pet.h"
+#include "../audio.h"
 #define TAMAPOKE_TDECK_PLUS 1
 #include "../src/ui/layout.h"
+std::vector<uint8_t> sounds;
 namespace {
 Pet pet;
 constexpr int16_t STARTER_DEX[3]={1,4,7};
@@ -32,6 +34,7 @@ void fresh(bool hatch=true) {
   pet=Pet(); pet.begin(); choiceKind=0; choiceUntil=confirmUntil=feedMenuUntil=0; baths=0;
   galleryOpen=kbOpen=clockOpen=cardOpen=gameOpen=sackOpen=false;
   galleryPage=galleryDetail=cardPage=0; galleryDirty=false; routedSecondary=0;
+  sounds.clear();
   if (hatch) { pet.chooseStarter(1); pet.eggTap(); pet.eggTap(); pet.eggTap(); }
 }
 void tap(const Layout::Rect &r) { compactTap(r.x+r.w/2,r.y+r.h/2); }
@@ -76,7 +79,18 @@ TEST(compact, all_food_choices_match_engine_results_and_dismiss_popup) {
     tap(Layout::food[i]); CHECK_EQ(feedMenuUntil,0U);
     CHECK_EQ(pet.fullness,expected.fullness); CHECK_EQ(pet.joy,expected.joy);
     CHECK_EQ(pet.weight,expected.weight); CHECK_EQ(pet.bond,expected.bond);
+    CHECK_EQ(sounds.back(),SFX_EAT);
   }
+}
+
+TEST(compact, ordinary_actions_preserve_original_sound_events) {
+  fresh(false); tap(Layout::starter[0]); CHECK_EQ(sounds.back(),SFX_TAP);
+  compactTap(100,100); CHECK_EQ(sounds.back(),SFX_TAP);
+  compactTap(100,100); compactTap(100,100); sounds.clear();
+  tap(Layout::care[0]); CHECK_EQ(sounds.back(),SFX_TAP);
+  tap(Layout::food[0]); CHECK_EQ(sounds.back(),SFX_EAT);
+  sounds.clear(); compactTap(100,100); CHECK_EQ(sounds.back(),SFX_HEART);
+  sounds.clear(); tap(Layout::care[3]); CHECK_EQ(sounds.back(),SFX_TAP);
 }
 TEST(compact, release_requires_live_confirmation_and_accept_rectangle) {
   fresh(); confirmUntil=millis()+1000;
