@@ -29,8 +29,10 @@ constexpr Rect trainButton{52,158,216,38};
 // Settings landing page: time source owns a full row, separate from controls.
 constexpr Rect settingsClock{12,34,86,26}, settingsSource{106,34,202,26};
 constexpr Rect syncGps{12,68,92,36}, syncWifi{114,68,92,36}, manualTime{216,68,92,36};
-constexpr Rect soundToggle{12,112,140,36}, languageToggle{168,112,140,36};
-constexpr Rect wifiSettings{12,156,296,36}, settingsFeedback{12,200,296,24};
+constexpr Rect soundToggle{12,100,140,30}, languageToggle{168,100,140,30};
+constexpr Rect wifiSettings{12,136,296,30};
+constexpr Rect timeoutSetting{12,172,188,32}, batteryStatus{208,172,100,32};
+constexpr Rect settingsFeedback{12,208,250,22};
 // Manual clock page.
 constexpr Rect hourMinus{12,88,52,44}, hourPlus{68,88,52,44};
 constexpr Rect minuteMinus{200,88,52,44}, minutePlus{256,88,52,44};

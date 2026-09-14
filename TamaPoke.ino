@@ -163,6 +163,28 @@ int16_t tX0, tY0, tXl, tYl; // gesto en curso (inicio y ultima posicion)
 uint32_t tStart = 0;
 bool holdFired = false;
 
+#if TAMAPOKE_TDECK_PLUS
+constexpr uint32_t CENTER_LONG_PRESS_MS=1750;
+void handleScreenPowerInput(uint32_t now) {
+  static bool wasCenter=false,longHandled=false;
+  static uint32_t centerDownAt=0;
+  Board::AuxiliaryInput input{};
+  if (!Board::sampleAuxiliaryInput(input)) return;
+  if (input.activity) lastInteract=now;
+  if (input.centerPressed&&!wasCenter) {
+    centerDownAt=now; longHandled=false;
+    if (screenOff) {
+      screenOff=false; lastInteract=now; dimStage=0; longHandled=true;
+      Serial.println("DISPLAY wake source=trackball-center");
+    }
+  } else if (input.centerPressed&&wasCenter&&!screenOff&&!longHandled&&now-centerDownAt>=CENTER_LONG_PRESS_MS) {
+    pet.flushSave(); screenOff=true; longHandled=true;
+    Serial.printf("DISPLAY off reason=center-long-press hold_ms=%lu\n",(unsigned long)(now-centerDownAt));
+  }
+  wasCenter=input.centerPressed;
+}
+#endif
+
 void setup() {
   Serial.setRxBufferSize(8192);  // la transferencia a SD llega en bloques de 2 KB
   Serial.begin(115200);
@@ -232,6 +254,9 @@ void ensureMon() {
 void loop() {
   uint32_t now = millis();
   pet.update(now);
+#if TAMAPOKE_TDECK_PLUS
+  handleScreenPowerInput(now);
+#endif
 
   // el amplificador sigue al estado de sueno (la llamada sale sola si no cambia).
   // Aqui cubre todas las vias: el boton de luz, el sueno nocturno y el que llega
@@ -342,7 +367,15 @@ void updateBrightness(uint32_t now) {
     lastInteract = now;
   }
   uint32_t idle = now - lastInteract;
+#if TAMAPOKE_TDECK_PLUS
+  if (!screenOff&&TpDisplay::shouldTurnOff(idle,Board::displayTimeoutIndex())) {
+    pet.flushSave(); screenOff=true;
+    Serial.printf("DISPLAY off reason=timeout idle_ms=%lu setting=%s\n",(unsigned long)idle,Board::displayTimeoutLabel());
+  }
+  dimStage=screenOff?2:TpDisplay::shouldDim(idle,Board::displayTimeoutIndex())?1:0;
+#else
   dimStage = (idle > 300000) ? 2 : (idle > 90000) ? 1 : 0;
+#endif
   uint8_t target = pet.sleeping ? 25 : (usbPresent() ? 180 : 145);
   if (dimStage == 1) target = pet.sleeping ? 10 : 60;
   else if (dimStage == 2) target = 8;
@@ -480,6 +513,11 @@ void handleTouch() {
   if (!Board::sampleTouch(sample, wasPressed)) return;
   int16_t x = sample.x, y = sample.y;
   bool pressed = sample.pressed;
+#if TAMAPOKE_TDECK_PLUS
+  // Pocket touches cannot wake the LCD. Keep tracking the physical state so a
+  // finger already down when the center button wakes cannot leak an action.
+  if (screenOff) { wasPressed=pressed; swallowGesture=true; return; }
+#endif
 
   // saco de entrenamiento: cada toque cuenta al instante (aporrear rapido)
   if (sackOpen) {

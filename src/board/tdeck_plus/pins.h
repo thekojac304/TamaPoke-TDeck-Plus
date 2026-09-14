@@ -8,4 +8,6 @@ constexpr int lcdCs = 12, lcdDc = 11, sdCs = 39, radioCs = 9;
 constexpr int sda = 18, scl = 8, touchInt = 16;
 constexpr int speakerBck = 7, speakerWs = 5, speakerDout = 6;
 constexpr int gpsRx = 44, gpsTx = 43;
+constexpr int batteryAdc = 4, trackCenter = 0;
+constexpr int trackUp = 3, trackRight = 2, trackDown = 15, trackLeft = 1;
 }

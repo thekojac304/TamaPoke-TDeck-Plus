@@ -4,11 +4,14 @@
 #include <SPI.h>
 #include <SD.h>
 #include <TouchDrvGT911.hpp>
+#include <Preferences.h>
 #include "st7789_init.h"
+#include "display_power_policy.h"
 namespace Board {
 using namespace TDeckPins;
 static TouchDrvGT911 touch;
 static bool touchOk = false, storageOk = false;
+static uint8_t timeoutIndex=TpDisplay::DEFAULT_TIMEOUT;
 // Match LILYGO's SPI mode 0. Arduino_ST7789 otherwise overrides it to mode 3.
 class PlusPanel : public Arduino_ST7789 {
 public:
@@ -40,6 +43,9 @@ bool begin(Arduino_Canvas *gfx) {
  pinMode(power, OUTPUT); digitalWrite(power, HIGH);
  for (int cs : {lcdCs, sdCs, radioCs}) { pinMode(cs, OUTPUT); digitalWrite(cs, HIGH); }
  pinMode(backlight, OUTPUT); brightness(0);
+ for (int pin : {trackCenter,trackUp,trackRight,trackDown,trackLeft}) pinMode(pin,INPUT_PULLUP);
+ Preferences prefs; prefs.begin("tp-display",true);
+ timeoutIndex=TpDisplay::validIndex(prefs.getUChar("timeout",TpDisplay::DEFAULT_TIMEOUT)); prefs.end();
  delay(500);
  Serial.printf("BOARD T-Deck Plus flash=%u PSRAM=%u power=ON\n", ESP.getFlashChipSize(), ESP.getPsramSize());
  Wire.begin(sda, scl); Wire.setTimeOut(50);
@@ -58,6 +64,23 @@ bool begin(Arduino_Canvas *gfx) {
  touch.setSwapXY(true); touch.setMirrorXY(false,true);
  Serial.printf("TOUCH GT911 0x%02X swapXY=1 mirrorY=1 %s\n", touch.getAddress(), touchOk ? "OK" : "FAIL");
  return true;
+}
+bool sampleAuxiliaryInput(AuxiliaryInput &s) {
+ static bool initialized=false;
+ static uint8_t prior=0x1F;
+ const int pins[5]={trackUp,trackRight,trackDown,trackLeft,trackCenter};
+ uint8_t state=0;
+ for (int i=0;i<5;++i) if (digitalRead(pins[i])!=LOW) state|=1u<<i;
+ s.centerPressed=(state&(1u<<4))==0;
+ s.activity=initialized&&((state^prior)&0x0F)!=0;
+ prior=state; initialized=true; return true;
+}
+uint8_t displayTimeoutIndex() { return timeoutIndex; }
+uint32_t displayTimeoutMs() { return TpDisplay::timeoutMs(timeoutIndex); }
+const char *displayTimeoutLabel() { return TpDisplay::timeoutLabel(timeoutIndex); }
+void setDisplayTimeoutIndex(uint8_t index) {
+ timeoutIndex=TpDisplay::validIndex(index);
+ Preferences prefs; prefs.begin("tp-display",false); prefs.putUChar("timeout",timeoutIndex); prefs.end();
 }
 bool sampleTouch(TouchSample &s, bool) {
  if (!touchOk) return false;

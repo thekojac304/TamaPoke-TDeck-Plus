@@ -160,6 +160,12 @@ static void renderCompactSettings() {
   compactButton(Layout::languageToggle,lang,UI_WHITE);
   char wifi[48]; snprintf(wifi,sizeof(wifi),"WIFI: %s%s",rtcWifiEnabled()?"ON ":"OFF",rtcWifiConfigured()?rtcWifiSsid():"NOT SET");
   compactButton(Layout::wifiSettings,wifi,UI_WHITE);
+  char timeout[32]; snprintf(timeout,sizeof(timeout),"SCREEN: %s",Board::displayTimeoutLabel());
+  compactButton(Layout::timeoutSetting,timeout,UI_WHITE);
+  int battery=batPercent(),mv=batMillivolts(); char power[24];
+  if (battery>=0&&mv>0) snprintf(power,sizeof(power),"%d%% %.2fV",battery,mv/1000.0f);
+  else snprintf(power,sizeof(power),"BAT: --");
+  compactButton(Layout::batteryStatus,power,UI_WHITE);
   const char *feedback=rtcSyncFeedback();
   if (feedback) { gfx->setTextColor(UI_BAR_BAD); compactCentered(feedback,Layout::settingsFeedback,1); }
   char ver[24]; snprintf(ver,sizeof(ver),"v%s",FW_VERSION);
@@ -270,6 +276,10 @@ static void compactClockTap(int16_t x,int16_t y) {
     else if (Layout::soundToggle.contains(x,y)) { audioSetEnabled(!audioEnabled()); if (audioEnabled()) sfxPlay(SFX_TAP); }
     else if (Layout::languageToggle.contains(x,y)) { setLang((Lang)((gLang+1)%LANG_COUNT)); applyLangFont(); sfxPlay(SFX_TAP); }
     else if (Layout::wifiSettings.contains(x,y)) clockPage=2;
+    else if (Layout::timeoutSetting.contains(x,y)) {
+      Board::setDisplayTimeoutIndex((Board::displayTimeoutIndex()+1)%TpDisplay::TIMEOUT_COUNT);
+      lastInteract=millis();
+    }
     return;
   }
   if (clockPage==1) {

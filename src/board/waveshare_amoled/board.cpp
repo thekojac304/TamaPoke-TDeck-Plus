@@ -49,6 +49,11 @@ bool sampleTouch(TouchSample &s, bool wasPressed) {
  s.pressed = touch.getPoint(&s.x, &s.y, 1) > 0;
  return true;
 }
+bool sampleAuxiliaryInput(AuxiliaryInput &) { return false; }
+uint8_t displayTimeoutIndex() { return 5; }
+uint32_t displayTimeoutMs() { return 0; }
+const char *displayTimeoutLabel() { return "NEVER"; }
+void setDisplayTimeoutIndex(uint8_t) {}
 void brightness(uint8_t value) { panel->setBrightness(value); }
 bool mountStorage() {
  SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA);
