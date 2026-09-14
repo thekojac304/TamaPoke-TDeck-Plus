@@ -172,7 +172,7 @@ void handleScreenPowerInput(uint32_t now) {
   if (!Board::sampleAuxiliaryInput(input)) return;
   if (input.activity) lastInteract=now;
   if (input.centerPressed&&!wasCenter) {
-    centerDownAt=now; longHandled=false;
+    centerDownAt=now; longHandled=false; lastInteract=now;
     if (screenOff) {
       screenOff=false; lastInteract=now; dimStage=0; longHandled=true;
       Serial.println("DISPLAY wake source=trackball-center");
