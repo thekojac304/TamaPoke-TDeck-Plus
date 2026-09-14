@@ -25,6 +25,15 @@ static void compactButton(const Layout::Rect &r, const char *label, uint16_t col
 }
 #include "secondary_landscape.h"
 #include "actions_landscape.h"
+static void compactBattery() {
+  int pc=batPercent(); if (pc<0) return;
+  const auto &r=Layout::homeBattery; int bx=r.x,by=r.y+4,bw=23,bh=10;
+  uint16_t color=pc>=40?inkColor():pc>=15?UI_BAR_WARN:UI_BAR_BAD;
+  gfx->drawRect(bx,by,bw,bh,color); gfx->fillRect(bx+bw,by+3,2,4,color);
+  int fill=(bw-4)*pc/100; if (fill) gfx->fillRect(bx+2,by+2,fill,bh-4,color);
+  char pct[12]; snprintf(pct,sizeof(pct),"%d%%",pc); gfx->setTextColor(color);
+  compactText(pct,bx+27,r.y+5,r.w-27,1);
+}
 void renderCompact() {
   if (timePromptOpen) { renderCompactTimePrompt(); return; }
   if (pet.awaitingStarter()) {
@@ -69,7 +78,8 @@ void renderCompact() {
   char title[80];
   if (pet.isEgg()) snprintf(title,sizeof(title),"%s",T(S_EGG_HDR));
   else snprintf(title,sizeof(title),T(S_NAME_FMT),pet.shiny ? "*" : "",pet.nick[0] ? pet.nick : dexName(pet.speciesId),pet.level());
-  compactText(title,44,5,176,2);
+  compactText(title,44,5,124,2);
+  compactBattery();
   compactButton(Layout::homeProfile,"i",UI_WHITE);
   compactButton(Layout::homeDex,"#",UI_WHITE);
   compactButton(Layout::homeSettings,"...",UI_WHITE);

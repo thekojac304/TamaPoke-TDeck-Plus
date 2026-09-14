@@ -18,6 +18,7 @@ constexpr Rect accept{24,94,272,40}, cancel{24,144,272,40};
 constexpr Rect progression{216,150,96,44};
 // Home navigation: these same rectangles are rendered and hit-tested.
 constexpr Rect homeProfile{0,0,40,24}, homeDex{224,0,48,24}, homeSettings{272,0,48,24};
+constexpr Rect homeBattery{172,3,48,18};
 
 // Shared secondary-screen chrome.
 constexpr Rect screenBack{272,0,48,32};

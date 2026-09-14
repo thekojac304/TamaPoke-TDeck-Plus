@@ -3,6 +3,7 @@
 #include "../../../rtcbat.h"
 #include "pins.h"
 #include "time_sync_policy.h"
+#include "battery_policy.h"
 #include <Preferences.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
@@ -302,11 +303,34 @@ bool rtcWifiConnectCandidate(const char *ssid,const char *password) {
   return beginWifi(WIFI_CONNECT_CANDIDATE,candidateSsid,candidatePass);
 }
 
-bool batBegin() { return false; }
+static int batteryMv=0,batteryPct=-1,batteryAdcMv=0;
+static uint32_t batteryReadAt=0,batteryLogAt=0;
+static void refreshBattery(bool force=false) {
+  uint32_t now=millis();
+  if (!force&&batteryReadAt&&now-batteryReadAt<10000UL) return;
+  batteryReadAt=now?now:1;
+  uint32_t sum=0;
+  for (int i=0;i<8;++i) sum+=analogReadMilliVolts(TDeckPins::batteryAdc);
+  batteryAdcMv=(int)(sum/8); int sample=batteryAdcMv*2;
+  if (!TpBattery::validMillivolts(sample)) { batteryMv=0; batteryPct=-1; }
+  else {
+    batteryMv=TpBattery::smoothMillivolts(batteryMv,sample);
+    batteryPct=TpBattery::stabilizePercent(batteryPct,TpBattery::estimatePercent(batteryMv));
+  }
+  if (force||!batteryLogAt||now-batteryLogAt>=60000UL) {
+    batteryLogAt=now?now:1;
+    Serial.printf("BATTERY adc_mv=%d cell_mv=%d smooth_mv=%d estimated_pct=%d\n",batteryAdcMv,sample,batteryMv,batteryPct);
+  }
+}
+bool batBegin() {
+  pinMode(TDeckPins::batteryAdc,INPUT);
+  analogReadResolution(12); analogSetPinAttenuation(TDeckPins::batteryAdc,ADC_11db);
+  refreshBattery(true); return batteryPct>=0;
+}
 void pmuEnablePanel() {}
-int batPercent() { return -1; }
+int batPercent() { refreshBattery(); return batteryPct; }
 bool batCharging() { return false; }
-int batMillivolts() { return 0; }
+int batMillivolts() { refreshBattery(); return batteryMv; }
 bool usbPresent() { return false; }
 void pwrSetup() {}
 bool pwrShortPressed() { return false; }

@@ -62,6 +62,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
     CHECK(r.x+r.w<=320); CHECK(r.y+r.h<=240);
   };
   fits(Layout::homeProfile); fits(Layout::homeDex); fits(Layout::homeSettings);
+  fits(Layout::homeBattery);
   fits(Layout::screenBack); fits(Layout::cardHome); fits(Layout::nicknameField);
   fits(Layout::trainButton); fits(Layout::hourMinus); fits(Layout::hourPlus);
   fits(Layout::minuteMinus); fits(Layout::minutePlus); fits(Layout::soundToggle);
@@ -91,6 +92,8 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
     return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
   };
   CHECK(!overlaps(Layout::settingsClock,Layout::settingsSource));
+  CHECK(!overlaps(Layout::homeBattery,Layout::homeDex));
+  CHECK(!overlaps(Layout::homeBattery,Layout::homeSettings));
   CHECK(!overlaps(Layout::settingsClock,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncWifi));

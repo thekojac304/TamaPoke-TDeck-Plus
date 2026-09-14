@@ -163,7 +163,7 @@ static void renderCompactSettings() {
   char timeout[32]; snprintf(timeout,sizeof(timeout),"SCREEN: %s",Board::displayTimeoutLabel());
   compactButton(Layout::timeoutSetting,timeout,UI_WHITE);
   int battery=batPercent(),mv=batMillivolts(); char power[24];
-  if (battery>=0&&mv>0) snprintf(power,sizeof(power),"%d%% %.2fV",battery,mv/1000.0f);
+  if (battery>=0&&mv>0) snprintf(power,sizeof(power),"%d%% %d.%02dV",battery,mv/1000,(mv%1000)/10);
   else snprintf(power,sizeof(power),"BAT: --");
   compactButton(Layout::batteryStatus,power,UI_WHITE);
   const char *feedback=rtcSyncFeedback();
