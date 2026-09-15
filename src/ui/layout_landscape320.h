@@ -34,6 +34,9 @@ constexpr Rect settingsClock{12,76,92,46}, settingsSource{112,76,196,46};
 constexpr Rect settingsTimezone{12,128,296,32};
 constexpr Rect syncGps{12,166,92,34}, syncWifi{114,166,92,34}, manualTime{216,166,92,34};
 constexpr Rect settingsFeedback{12,208,296,14};
+// Two-level timezone picker: four rows plus compact paging controls.
+constexpr Rect timezoneRows[4]={{12,42,296,32},{12,82,296,32},{12,122,296,32},{12,162,296,32}};
+constexpr Rect timezonePrev{12,204,58,30},timezoneInfo{78,204,164,30},timezoneNext{250,204,58,30};
 constexpr Rect soundToggle{12,78,140,38}, languageToggle{168,78,140,38};
 constexpr Rect timeoutSetting{12,126,296,38}, batteryStatus{12,174,296,30};
 // Manual clock page.

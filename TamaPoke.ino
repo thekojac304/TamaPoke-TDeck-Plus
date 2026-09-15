@@ -26,6 +26,7 @@
 #include "audio.h"
 #if TAMAPOKE_TDECK_PLUS
 #include "src/board/tdeck_plus/wifi_connection_policy.h"
+#include "src/board/tdeck_plus/timezone_policy.h"
 #endif
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
@@ -72,7 +73,9 @@ uint8_t cardPage = 0;         // 0 perfil, 1 stats+medallas
 bool clockOpen = false;       // pantalla de ajuste de hora (deslizar abajo)
 int clockH = 12, clockM = 0;  // hora en edicion
 #if TAMAPOKE_TDECK_PLUS
-uint8_t clockPage = 0;        // 0 Time, 1 manual, 2 Wi-Fi, 3 networks, 4 password, 5 catch-up confirm, 6 System
+uint8_t clockPage = 0;        // 0 Time, 1 manual, 2 Wi-Fi, 3 networks, 4 password, 5 catch-up, 6 System, 7/8 timezone
+TpTimezone::Region timezoneRegion = TpTimezone::REGION_UTC;
+uint8_t timezoneRegionPage = 0, timezonePresetPage = 0;
 bool timePromptOpen = false, timePromptShown = false;
 uint32_t manualReferenceEpoch = 0, manualNewEpoch = 0, manualElapsedSeconds = 0;
 char wifiSelectedSsid[33] = "", wifiPassword[65] = "";

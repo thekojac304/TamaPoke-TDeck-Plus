@@ -70,6 +70,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::manualSource); fits(Layout::catchupInfo); fits(Layout::catchupApply); fits(Layout::catchupCancel);
   fits(Layout::settingsClock); fits(Layout::settingsSource); fits(Layout::syncGps); fits(Layout::syncWifi);
   fits(Layout::manualTime); fits(Layout::settingsFeedback); fits(Layout::settingsTimezone);
+  fits(Layout::timezonePrev); fits(Layout::timezoneInfo); fits(Layout::timezoneNext);
   fits(Layout::timeoutSetting); fits(Layout::batteryStatus);
   fits(Layout::wifiToggle); fits(Layout::wifiNetwork); fits(Layout::wifiScan);
   fits(Layout::wifiConnect); fits(Layout::wifiForget); fits(Layout::wifiSyncTime);
@@ -78,6 +79,7 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   fits(Layout::sackExit); fits(Layout::sackTarget); fits(Layout::gameViewport);
   fits(Layout::gameHud); fits(Layout::gameExit);
   for (int i=0;i<4;++i) fits(Layout::cardTabs[i]);
+  for (int i=0;i<4;++i) fits(Layout::timezoneRows[i]);
   for (int i=0;i<3;++i) fits(Layout::settingsTabs[i]);
   for (int i=0;i<30;++i) {
     auto key=Layout::keyboardKey(i); fits(key);
@@ -101,6 +103,12 @@ TEST(layout, secondary_controls_and_generated_cells_fit_landscape) {
   CHECK(!overlaps(Layout::settingsClock,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsClock,Layout::settingsTimezone));
   CHECK(!overlaps(Layout::settingsTimezone,Layout::syncGps));
+  for (int i=0;i<3;++i) CHECK(!overlaps(Layout::timezoneRows[i],Layout::timezoneRows[i+1]));
+  CHECK(!overlaps(Layout::timezoneRows[3],Layout::timezonePrev));
+  CHECK(!overlaps(Layout::timezoneRows[3],Layout::timezoneInfo));
+  CHECK(!overlaps(Layout::timezoneRows[3],Layout::timezoneNext));
+  CHECK(!overlaps(Layout::timezonePrev,Layout::timezoneInfo));
+  CHECK(!overlaps(Layout::timezoneInfo,Layout::timezoneNext));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncGps));
   CHECK(!overlaps(Layout::settingsSource,Layout::syncWifi));
   CHECK(!overlaps(Layout::settingsSource,Layout::manualTime));

@@ -57,9 +57,31 @@ TEST(time_sync, failed_sync_prompt_is_consumed_once_per_boot) {
 }
 
 TEST(time_sync, open_settings_fields_refresh_from_new_wall_epoch) {
-  int hour=1,minute=2;
-  timeFieldsFromEpoch(1767269700UL,hour,minute); // 2026-01-01 12:15 UTC
+  TpTime::SyncPolicy sync; int hour=1,minute=2;
+  uint32_t utc=TpTimezone::epoch(2026,1,1,17,15);
+  CHECK(sync.accept(TpTime::GPS,utc));
+  timeFieldsFromEpoch(TpTimezone::localEpoch(TpTimezone::US_EASTERN,utc),hour,minute);
   CHECK_EQ(hour,12); CHECK_EQ(minute,15);
+}
+
+TEST(time_sync, gps_utc_sync_immediately_projects_selected_timezone) {
+  TpTime::SyncPolicy sync; uint32_t utc=TpTimezone::epoch(2026,1,15,17);
+  CHECK(sync.accept(TpTime::GPS,utc));
+  CHECK_EQ(TpTimezone::localEpoch(TpTimezone::US_EASTERN,utc),TpTimezone::epoch(2026,1,15,12));
+}
+
+TEST(time_sync, ntp_utc_sync_immediately_projects_selected_timezone) {
+  TpTime::SyncPolicy sync; uint32_t utc=TpTimezone::epoch(2026,1,15,17);
+  CHECK(sync.accept(TpTime::WIFI,utc));
+  CHECK_EQ(TpTimezone::localEpoch(TpTimezone::INDIA,utc),TpTimezone::epoch(2026,1,15,22,30));
+}
+
+TEST(time_sync, authoritative_projection_does_not_require_timezone_cycle) {
+  TpTime::SyncPolicy sync; TpTimezone::Preset selected=TpTimezone::US_PACIFIC;
+  uint32_t utc=TpTimezone::epoch(2026,7,15,19);
+  CHECK(sync.accept(TpTime::GPS,utc));
+  CHECK_EQ(TpTimezone::localEpoch(selected,utc),TpTimezone::epoch(2026,7,15,12));
+  CHECK_EQ(selected,TpTimezone::US_PACIFIC);
 }
 
 TEST(time_sync, manual_catchup_requires_forward_sane_reference_and_confirmation) {
@@ -98,6 +120,23 @@ TEST(time_sync, timezone_change_cannot_duplicate_authoritative_catchup) {
   CHECK(p.consumeCatchup());
   (void)TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,TpTimezone::epoch(2026,7,15,16));
   CHECK(!p.consumeCatchup());
+}
+
+TEST(time_sync, worldwide_presets_are_grouped_stable_and_dst_aware) {
+  CHECK_EQ(TpTimezone::COUNT,50);
+  CHECK_EQ(TpTimezone::fromId("us-eastern"),TpTimezone::US_EASTERN);
+  CHECK_EQ(TpTimezone::fromId("nz-chatham"),TpTimezone::CHATHAM);
+  CHECK_EQ(TpTimezone::fromId("unknown-future-zone"),TpTimezone::UTC);
+  CHECK_EQ(TpTimezone::countInRegion(TpTimezone::NORTH_AMERICA),9);
+  CHECK_EQ(TpTimezone::countInRegion(TpTimezone::OCEANIA),9);
+  uint32_t july=TpTimezone::epoch(2026,7,15,12),january=TpTimezone::epoch(2026,1,15,12);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::LONDON,2026,july),3600);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::LONDON,2026,january),0);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::ADELAIDE,2026,january),630*60);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::ADELAIDE,2026,july),570*60);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::CHATHAM,2026,january),825*60);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::INDIA,2026,january),330*60);
+  CHECK_EQ(TpTimezone::offsetSeconds(TpTimezone::ARIZONA,2026,july),-420*60);
 }
 
 TEST(wifi_connection, disconnected_return_after_begin_remains_connecting) {

@@ -412,6 +412,9 @@ static void pollWifi(uint32_t now) {
     if (wifiAction==WIFI_CONNECT_SAVED) { setFeedback("WIFI CONNECTED"); syncState=RTC_SYNC_IDLE; radioOff("connection-verified"); clearWifiAction("connect-saved"); return; }
     ntpStartedAt=now; wallBeforeNtp=rtcEpoch(); syncState=RTC_SYNC_NTP_WAITING;
     sntp_set_time_sync_notification_cb(onNtpSync); configTime(0,0,"pool.ntp.org","time.cloudflare.com");
+    // Arduino's configTime(0,0,...) sets the process TZ to UTC0. Restore the
+    // selected presentation rule immediately; the system epoch remains UTC.
+    applyTimezone();
     Serial.println("CLOCK source=WIFI NTP requested");
   }
   if (!ntpStartedAt&&!wifiBeginPending&&wifiConnection.failed()) {
@@ -441,6 +444,9 @@ static bool acceptSource(RtcTimeSource source,uint32_t utc,uint32_t now,uint32_t
   Serial.printf("CLOCK source=%s acquired_utc=%lu\n",name,(unsigned long)utc);
   Serial.printf("CLOCK references saved_utc=%lu saved_wall=%lu offset=%ld\n",(unsigned long)priorUtc,(unsigned long)priorWall,(long)wallOffset);
   bool hadMapping=mapped;
+  // NTP setup can replace TZ with UTC0. Reapply for both sources so a GPS fix
+  // arriving during NTP fallback is projected with the selected timezone too.
+  applyTimezone();
   if (mapped) {
     if (!TpTime::validDelta(utc,savedUtc)) {
       Serial.printf("CLOCK source=%s rejected delta=%lu\n",name,(unsigned long)(utc>=savedUtc?utc-savedUtc:0));
@@ -465,7 +471,19 @@ bool rtcBegin(uint32_t petSavedWall) {
   Preferences p; p.begin("tp-clock",true); savedWall=p.getUInt("wall",0); savedUtc=p.getUInt("utc",0);
   mapped=p.getBool("mapped",false)&&validEpoch(savedWall)&&validEpoch(savedUtc);
   trusted=p.getBool("trusted",mapped)&&validEpoch(savedWall); wallOffset=p.getInt("offset",0);
-  timezonePreset=TpTimezone::valid(p.getUChar("tz",TpTimezone::UTC)); p.end(); applyTimezone();
+  uint8_t oldTimezone=p.getUChar("tz",TpTimezone::UTC); char timezoneId[28]={0};
+  p.getString("tzid",timezoneId,sizeof(timezoneId)); p.end();
+  bool timezoneMigrated=false,timezoneFallback=false;
+  if (timezoneId[0]) { timezoneFallback=!TpTimezone::findId(timezoneId,timezonePreset); timezoneMigrated=timezoneFallback; }
+  else if (oldTimezone<TpTimezone::COUNT) { timezonePreset=TpTimezone::valid(oldTimezone); timezoneMigrated=true; }
+  else { timezonePreset=TpTimezone::UTC; timezoneMigrated=timezoneFallback=true; }
+  applyTimezone();
+  if (timezoneMigrated) {
+    Preferences migration; if (migration.begin("tp-clock",false)) {
+      migration.putUChar("tz",(uint8_t)timezonePreset); migration.putString("tzid",TpTimezone::id(timezonePreset)); migration.end();
+    }
+    Serial.printf("CLOCK timezone migration legacy=%u stable_id=%s fallback=%d\n",(unsigned)oldTimezone,TpTimezone::id(timezonePreset),timezoneFallback?1:0);
+  }
   // Keep the previous tp-clock acceptance range for backward compatibility.
   if (wallOffset<-2*86400L||wallOffset>2*86400L) mapped=false;
   Preferences w; bool wifiNvs=w.begin("tp-wifi",true); bool migrateLegacy=false;
@@ -551,7 +569,7 @@ const char *rtcTimezoneLabel() { return TpTimezone::label(timezonePreset); }
 uint8_t rtcTimezoneIndex() { return (uint8_t)timezonePreset; }
 uint32_t rtcSetTimezoneIndex(uint8_t index) {
   timezonePreset=TpTimezone::valid(index); applyTimezone();
-  Preferences p; if (p.begin("tp-clock",false)) { p.putUChar("tz",(uint8_t)timezonePreset); p.end(); }
+  Preferences p; if (p.begin("tp-clock",false)) { p.putUChar("tz",(uint8_t)timezonePreset); p.putString("tzid",TpTimezone::id(timezonePreset)); p.end(); }
   uint32_t utc=mapped?(uint32_t)time(nullptr):0,wall=validEpoch(utc)?wallFromUtc(utc):rtcEpoch();
   if (mapped&&validEpoch(wall)) persistNow(wall,utc);
   setFeedback("TIMEZONE CHANGED");

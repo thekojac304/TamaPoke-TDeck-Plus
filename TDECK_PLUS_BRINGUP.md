@@ -76,15 +76,40 @@ now emit the same existing IDs as the round UI. The T-Deck backend logs queued,
 started, completed and cancelled/discarded IDs, stops the current tone on mute or
 sleep, clears queued effects, and still releases I2S after each burst.
 
-GPS and NTP were parsed as UTC but the first authoritative mapping used a zero
-wall offset, so UTC was displayed directly. The ESP32 system clock now stays on
-the authoritative UTC timeline. User-facing and local-gameplay values are
-projected through a persisted POSIX timezone preset. The preset list is UTC, US
-Eastern, Central, Mountain, and Pacific; US zones use the current second-Sunday
-in March/first-Sunday in November DST rules. A missing setting defaults to UTC
-and must be selected explicitly. Changing it calls `setClock()`, never
-`syncClock()`, so it cannot replay offline progression. Existing `tp-clock`
-wall/UTC/mapping keys remain readable.
+GPS and NTP are authoritative UTC sources; user-facing and local-gameplay values
+are projected through a persisted POSIX timezone preset. A later physical-test
+failure was caused by Arduino `configTime(0,0,...)` replacing the process `TZ`
+with `UTC0` after the saved preset had been applied at boot. Both NTP startup and
+every successful GPS/NTP acceptance now reapply the selected POSIX rule before
+deriving wall time. The accepted wall epoch is immediately sent through the
+existing one-shot `syncClock()`/`setClock()` decision, so an open Time/manual
+screen and Home day/night rendering see it on their next frame without cycling
+the selector. A timezone-only change still calls `setClock()`, never
+`syncClock()`, and cannot replay progression.
+
+The compact selector is Region -> paginated preset list, with four rows per page,
+the selected item marked, and a live local-time preview. The centralized presets
+are:
+
+- UTC: UTC.
+- North America: Newfoundland, Atlantic, Eastern, Central, Mountain, Arizona,
+  Pacific, Alaska, Hawaii.
+- South America: Brasilia, Buenos Aires, Santiago, Bogota, Lima.
+- Europe: London, Dublin, Lisbon, Central Europe, Eastern Europe, Helsinki,
+  Athens, Moscow.
+- Africa: Casablanca, West Africa, Central Africa, South Africa, East Africa.
+- Asia: Israel, Gulf / Dubai, India, Pakistan, Bangladesh, Thailand / Vietnam,
+  China, Japan, Korea, Singapore, Indonesia / Jakarta, Makassar, Jayapura.
+- Oceania: Perth, Adelaide, Darwin, Brisbane, Sydney, Melbourne, Tasmania /
+  Hobart, Auckland, Chatham Islands.
+
+North American, European, Chilean, Israeli, southern-Australian, New Zealand and
+Chatham presets carry explicit POSIX DST transition rules. Arizona, Hawaii,
+Brisbane, Darwin and Perth remain fixed; half-hour and quarter-hour offsets are
+represented directly. Casablanca uses Morocco's permanent UTC+1 base; its
+government-announced Ramadan suspension cannot be represented by a recurring
+POSIX rule and requires firmware rule updates if exact Ramadan wall time is
+needed.
 
 The T-Deck state flow is:
 
@@ -155,10 +180,14 @@ T-Deck-specific state is isolated from the existing pet-save schema:
 | `tp-clock` | `mapped` | bool | UTC/wall pair is valid |
 | `tp-clock` | `trusted` | bool | Manual catch-up has a valid reference |
 | `tp-clock` | `tz` | uint8 | POSIX timezone preset index; absent/invalid means UTC |
+| `tp-clock` | `tzid` | string | Stable timezone ID used by expanded presets |
 | `tp-display` | `timeout` | uint8 | 0..5 timeout choice; default 2 (two minutes) |
 
-The `trusted` key is backward-compatible: a valid legacy mapped pair is treated
-as trusted when the key is absent. No existing pet NVS key changed.
+The original numeric values for UTC/Eastern/Central/Mountain/Pacific remain 0..4,
+so existing users retain their selection. New saves also write the stable `tzid`.
+An unknown ID or invalid legacy index is rewritten to UTC and logged. The
+`trusted` key is backward-compatible: a valid legacy mapped pair is treated as
+trusted when the key is absent. No existing pet NVS key changed.
 
 Successful GPS sync emits (numbers vary):
 
@@ -220,26 +249,30 @@ Physical validation for this pass:
 1. Verify startup, hatch, feed, pet/heart, light sleep/wake, bath, evolution,
    ceremony, strength training and ball-game sounds; mute during a long effect
    and confirm playback/queue stop; confirm idle has no hiss.
-2. Select US Eastern, boot outdoors, and confirm `TIME: GPS` plus UTC-5 in winter
+2. Select Eastern, boot outdoors, and confirm `TIME: GPS` plus UTC-5 in winter
    or UTC-4 in summer; switch UTC/Eastern/Pacific and confirm only wall display
    and local day/night semantics move, with `catchup=0` for each timezone change.
-3. Leave Settings and then the manual editor open while GPS sync arrives; both
-   must refresh without closing, overlap or stale hour/minute values.
-4. Enable Wi-Fi, scan, select a network, enter letters/numbers/symbols with the
+3. Leave Time and then the manual editor open while GPS sync arrives; both must
+   refresh immediately without closing, overlap or stale hour/minute values.
+   Repeat using Wi-Fi/NTP, without cycling the timezone first.
+4. Walk every region and preset page. Check Eastern in winter/summer, Arizona,
+   London, Adelaide, India and Chatham against a trusted reference, including
+   date rollover, and reboot to confirm the exact selection persists.
+5. Enable Wi-Fi, scan, select a network, enter letters/numbers/symbols with the
    physical keyboard, test backspace, Escape, Enter, and touch Connect/Cancel.
    Confirm masked display, `TIME: WIFI`, no password in serial output, saved
    `KNOWN` count, and radio shutdown. Save a second network, then confirm the
    strongest visible saved network is reused after reboot/manual sync and a
    starred scan row reconnects the selected network without password entry.
-5. Enter a deliberately wrong password and confirm an authentication reason is
+6. Enter a deliberately wrong password and confirm an authentication reason is
    logged, no secret appears, the device stays running, and retry succeeds.
-6. Reboot after a measured powered-off interval and confirm exactly one nonzero
+7. Reboot after a measured powered-off interval and confirm exactly one nonzero
    `catchup_minutes`; repeat with a backward/bad timestamp and confirm zero.
-7. Disable Wi-Fi and test GPS failure: the Set Time/Later prompt appears once,
+8. Disable Wi-Fi and test GPS failure: the Set Time/Later prompt appears once,
    Later keeps gameplay usable, and manual setting shows `TIME: MANUAL`.
-8. Forget the known network, verify automatic reuse stops, then toggle Wi-Fi off
+9. Forget the known network, verify automatic reuse stops, then toggle Wi-Fi off
    with credentials saved and verify the radio stays off until re-enabled.
-9. Smoke-test the Waveshare build for unchanged clock, layout and audio behavior.
+10. Smoke-test the Waveshare build for unchanged clock, layout and audio behavior.
 
 ## Scope and architecture
 
@@ -494,13 +527,15 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
 ## Validation and changed files
 
 - Both final targets build with the pinned dependencies above. Waveshare reports
-  812,378 bytes of sketch flash use and 33,548 bytes static RAM. T-Deck Plus
-  reports 1,344,931 bytes of sketch flash use and 57,248 bytes static RAM.
-- Host suite: **134 tests, 39,634 assertions, all passed**. Targeted coverage now
+  812,406 bytes of sketch flash use and 33,548 bytes static RAM. T-Deck Plus
+  reports 1,358,667 bytes of sketch flash use and 57,672 bytes static RAM.
+- Host suite: **149 tests, 39,761 assertions, all passed**. Targeted coverage now
   proves Set Clock Only does not progress the pet; manual confirmed catch-up and
   GPS/Wi-Fi authoritative delivery advance age, level/evolution readiness, needs,
   and existing daily state through `syncClock()`; and each absolute catch-up can
-  be consumed only once. Timeout and battery estimation policies are also tested.
+  be consumed only once. It also covers immediate selected-timezone projection
+  for GPS/NTP, open-Time-screen refresh, DST/fractional offsets, stable IDs, and
+  timezone-only changes without catch-up. Timeout and battery policies remain tested.
   Hardware ADC, GPIO, GPS, Wi-Fi, audio, and framebuffer output are not simulated.
 - Translation format check passed. Python tools suite: **16 passed, one failed**
   on Windows: `test_los_scripts_ejecutables_declaran_shebang` assumes POSIX
@@ -515,24 +550,23 @@ with `--touch-debug` and look for `TOUCH x y` on new pressed reports.
   checksum and hash. Staged T-Deck firmware sources match the working tree.
   No physical device tests or flashing were performed.
 
-This physical-test pass modified `TDECK_PLUS_BRINGUP.md`, `TamaPoke.ino`,
-`src/board/tdeck_plus/{audio.cpp,battery_policy.h,board.cpp,display_power_policy.h,rtcbat.cpp}`,
+The timezone follow-up modified `TDECK_PLUS_BRINGUP.md`, `TamaPoke.ino`,
+`src/board/tdeck_plus/{rtcbat.cpp,timezone_policy.h}`,
 `src/ui/{layout_landscape320.h,secondary_landscape.h}`, and
-`test/{test_battery.cpp,test_display_power.cpp,test_layout.cpp}`. Gameplay
-data/rules, sprite assets, Waveshare behavior, and the existing pet NVS schema
-were preserved.
+`test/{test_pet.cpp,test_time_sync.cpp}`. Gameplay data/rules, sprite assets,
+Waveshare behavior, and the existing pet NVS schema were preserved.
 
 Final firmware results:
 
 | Target | Compile | Application `.bin` bytes | Static RAM reported |
 |---|---|---:|---:|
-| Waveshare | PASS | 812,528 | 33,548 |
-| T-Deck Plus | PASS | 1,345,072 | 57,248 |
+| Waveshare | PASS | 812,560 | 33,548 |
+| T-Deck Plus | PASS | 1,358,816 | 57,672 |
 
 T-Deck application SHA-256:
-`121b3cbe658e05a21496e0bc03409372f76b1c8eeaa37c35294c72c9b4f284af`.
+`08d28f0bc58f0261d571b70d99dfdfe24b85d9032e60c19b628d42d41444f23a`.
 Waveshare application SHA-256:
-`b74a4118b5589545e26710938ea058d84273f4781dc2c6191239700bf82b060a`.
+`ba9381fbf8e36edf0ab20bb76e6473f83d19971be1e7e64bc0b6031daa00bbb2`.
 Esptool validated the T-Deck ESP32-S3 image checksum/hash and 16 MB flash header.
 The bootstrap image header says DIO, as configured by Arduino's QIO boot profile;
 that is separate from LCD SPI mode 0 and its 40 MHz speed.

@@ -168,6 +168,41 @@ static void renderCompactSettings() {
   gfx->flush();
 }
 
+static void renderCompactTimezoneRegions() {
+  compactScreenTitle("SELECT REGION");
+  uint8_t first=timezoneRegionPage*4;
+  for (uint8_t row=0;row<4;++row) {
+    uint8_t value=first+row; char name[28];
+    if (value<TpTimezone::REGION_COUNT) snprintf(name,sizeof(name),"%s%s",value==(uint8_t)TpTimezone::region(TpTimezone::valid(rtcTimezoneIndex()))?"* ":"",TpTimezone::regionLabel((TpTimezone::Region)value));
+    else snprintf(name,sizeof(name),"-");
+    compactButton(Layout::timezoneRows[row],name,value<TpTimezone::REGION_COUNT?UI_WHITE:UI_TRACK);
+  }
+  uint8_t pages=(TpTimezone::REGION_COUNT+3)/4; char info[16]; snprintf(info,sizeof(info),"PAGE %u/%u",(unsigned)(timezoneRegionPage+1),(unsigned)pages);
+  compactButton(Layout::timezonePrev,"<",timezoneRegionPage?UI_WHITE:UI_TRACK);
+  gfx->setTextColor(Layout::secondaryText); compactCentered(info,Layout::timezoneInfo,1);
+  compactButton(Layout::timezoneNext,timezoneRegionPage+1<pages?">":"-",timezoneRegionPage+1<pages?UI_WHITE:UI_TRACK);
+  gfx->flush();
+}
+
+static void renderCompactTimezonePresets() {
+  compactScreenTitle(TpTimezone::regionLabel(timezoneRegion));
+  uint8_t count=TpTimezone::countInRegion(timezoneRegion),first=timezonePresetPage*4;
+  for (uint8_t row=0;row<4;++row) {
+    uint8_t offset=first+row; char name[40];
+    if (offset<count) {
+      TpTimezone::Preset preset=TpTimezone::presetInRegion(timezoneRegion,offset);
+      snprintf(name,sizeof(name),"%s%s",rtcTimezoneIndex()==(uint8_t)preset?"* ":"",TpTimezone::shortLabel(preset));
+    } else snprintf(name,sizeof(name),"-");
+    compactButton(Layout::timezoneRows[row],name,offset<count?UI_WHITE:UI_TRACK);
+  }
+  uint8_t pages=(count+3)/4; uint32_t wall=rtcEpoch(); char info[24];
+  snprintf(info,sizeof(info),"LOCAL %02lu:%02lu  %u/%u",(unsigned long)((wall/3600)%24),(unsigned long)((wall/60)%60),(unsigned)(timezonePresetPage+1),(unsigned)pages);
+  compactButton(Layout::timezonePrev,"<",timezonePresetPage?UI_WHITE:UI_TRACK);
+  gfx->setTextColor(Layout::secondaryText); compactCentered(info,Layout::timezoneInfo,1);
+  compactButton(Layout::timezoneNext,timezonePresetPage+1<pages?">":"-",timezonePresetPage+1<pages?UI_WHITE:UI_TRACK);
+  gfx->flush();
+}
+
 static void renderCompactSystem() {
   compactScreenTitle("SETTINGS"); compactSettingsTabs(2);
   compactButton(Layout::soundToggle,audioEnabled()?T(S_SND_ON):T(S_SND_OFF),audioEnabled()?UI_BAR_OK:UI_WHITE);
@@ -265,6 +300,8 @@ static void renderCompactClock() {
   else if (clockPage==4) renderCompactWifiPassword();
   else if (clockPage==5) renderCompactCatchupConfirm();
   else if (clockPage==6) renderCompactSystem();
+  else if (clockPage==7) renderCompactTimezoneRegions();
+  else if (clockPage==8) renderCompactTimezonePresets();
   else renderCompactSettings();
 }
 
@@ -273,6 +310,8 @@ static void compactClockTap(int16_t x,int16_t y) {
     if (clockPage==5) { rtcCancelManualCatchup(); clockPage=1; }
     else if (clockPage==1) clockPage=0;
     else if (clockPage==3||clockPage==4) clockPage=2;
+    else if (clockPage==8) clockPage=7;
+    else if (clockPage==7) clockPage=0;
     else clockOpen=false;
     return;
   }
@@ -280,10 +319,41 @@ static void compactClockTap(int16_t x,int16_t y) {
     for (int i=0;i<3;++i) if (Layout::settingsTabs[i].contains(x,y)) { clockPage=i==0?0:i==1?2:6; return; }
   }
   if (clockPage==0) {
-    if (Layout::settingsTimezone.contains(x,y)) { uint32_t wall=rtcSetTimezoneIndex((rtcTimezoneIndex()+1)%5); if (wall) pet.setClock(wall); }
+    if (Layout::settingsTimezone.contains(x,y)) {
+      timezoneRegion=TpTimezone::region(TpTimezone::valid(rtcTimezoneIndex()));
+      timezoneRegionPage=(uint8_t)timezoneRegion/4;
+      timezonePresetPage=TpTimezone::offsetInRegion(TpTimezone::valid(rtcTimezoneIndex()))/4; clockPage=7;
+    }
     else if (Layout::syncGps.contains(x,y)) rtcRequestGpsSync();
     else if (Layout::syncWifi.contains(x,y)) rtcRequestWifiSync();
     else if (Layout::manualTime.contains(x,y)) openManualClock();
+    return;
+  }
+  if (clockPage==7) {
+    uint8_t pages=(TpTimezone::REGION_COUNT+3)/4;
+    if (Layout::timezonePrev.contains(x,y)&&timezoneRegionPage) --timezoneRegionPage;
+    else if (Layout::timezoneNext.contains(x,y)&&timezoneRegionPage+1<pages) ++timezoneRegionPage;
+    else for (uint8_t row=0;row<4;++row) if (Layout::timezoneRows[row].contains(x,y)) {
+      uint8_t value=timezoneRegionPage*4+row; if (value<TpTimezone::REGION_COUNT) {
+        timezoneRegion=(TpTimezone::Region)value;
+        TpTimezone::Preset current=TpTimezone::valid(rtcTimezoneIndex());
+        timezonePresetPage=TpTimezone::region(current)==timezoneRegion?TpTimezone::offsetInRegion(current)/4:0; clockPage=8;
+      } return;
+    }
+    return;
+  }
+  if (clockPage==8) {
+    uint8_t count=TpTimezone::countInRegion(timezoneRegion),pages=(count+3)/4;
+    if (Layout::timezonePrev.contains(x,y)&&timezonePresetPage) --timezonePresetPage;
+    else if (Layout::timezoneNext.contains(x,y)&&timezonePresetPage+1<pages) ++timezonePresetPage;
+    else for (uint8_t row=0;row<4;++row) if (Layout::timezoneRows[row].contains(x,y)) {
+      uint8_t offset=timezonePresetPage*4+row; if (offset<count) {
+        uint32_t wall=rtcSetTimezoneIndex((uint8_t)TpTimezone::presetInRegion(timezoneRegion,offset));
+        if (wall) { pet.setClock(wall); timeFieldsFromEpoch(wall,clockH,clockM); }
+        clockPage=0;
+      }
+      return;
+    }
     return;
   }
   if (clockPage==6) {

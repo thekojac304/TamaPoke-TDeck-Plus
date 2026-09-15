@@ -4,6 +4,7 @@
 #include "../pet.h"
 #include "../dex.h"
 #include "../src/board/tdeck_plus/time_sync_policy.h"
+#include "../src/board/tdeck_plus/timezone_policy.h"
 #include <string.h>
 
 // ---------------------------------------------------------------- helpers
@@ -953,6 +954,15 @@ TEST(offline, wifi_ntp_autoritativo_entrega_exactamente_un_catchup_al_juego) {
   CHECK_EQ(p.lastCatchupMinutes,16u*60);
   CHECK(!sync.consumeCatchup());
   CHECK_EQ(p.ageMinutes,16u*60);
+}
+
+TEST(offline, timezone_change_after_sync_is_display_only_and_never_replays_catchup) {
+  Pet p; makePet(p,4); uint32_t utc=TpTimezone::epoch(2026,7,15,16);
+  p.setClock(TpTimezone::localEpoch(TpTimezone::US_EASTERN,utc));
+  uint32_t age=p.ageMinutes;
+  p.setClock(TpTimezone::localEpoch(TpTimezone::US_PACIFIC,utc));
+  CHECK_EQ(p.ageMinutes,age); CHECK_EQ(p.lastCatchupMinutes,0U);
+  CHECK_EQ(p.lastSeenEpoch,TpTimezone::epoch(2026,7,15,9));
 }
 
 TEST(offline, catchup_updates_day_reference_for_existing_daily_care_rules) {
