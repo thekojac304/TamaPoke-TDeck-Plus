@@ -24,6 +24,9 @@
 #include "rtcbat.h"
 #include "i18n.h"
 #include "audio.h"
+#if TAMAPOKE_TDECK_PLUS
+#include "src/board/tdeck_plus/wifi_connection_policy.h"
+#endif
 
 // Version del firmware. Subir este numero en cada release (y manifest.json para
 // el instalador web). Se muestra en la pantalla de ajustes y por serie al arrancar.
@@ -174,11 +177,9 @@ void handleScreenPowerInput(uint32_t now) {
   if (input.key&&clockOpen&&clockPage==4) {
     uint8_t key=input.key;
     if (key==27) clockPage=2;
-    else if (key==8||key==127) { if (wifiPasswordLen) wifiPassword[--wifiPasswordLen]=0; }
+    else if (key==8||key==127) { size_t len=wifiPasswordLen; TpWifi::appendCredentialKey(wifiPassword,sizeof(wifiPassword),key,len); wifiPasswordLen=(uint8_t)len; }
     else if (key=='\r'||key=='\n') { rtcWifiConnectCandidate(wifiSelectedSsid,wifiPassword); clockPage=2; }
-    else if (key>=32&&key<=126&&wifiPasswordLen<sizeof(wifiPassword)-1) {
-      wifiPassword[wifiPasswordLen++]=(char)key; wifiPassword[wifiPasswordLen]=0;
-    }
+    else { size_t len=wifiPasswordLen; TpWifi::appendCredentialKey(wifiPassword,sizeof(wifiPassword),key,len); wifiPasswordLen=(uint8_t)len; }
   }
   if (input.centerPressed&&!wasCenter) {
     centerDownAt=now; longHandled=false; lastInteract=now;

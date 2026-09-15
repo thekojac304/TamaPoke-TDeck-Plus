@@ -38,6 +38,7 @@ uint32_t rtcSetTimezoneIndex(uint8_t index);
 bool rtcWifiEnabled();
 bool rtcWifiConfigured();
 const char *rtcWifiSsid();
+int rtcWifiKnownCount();
 void rtcWifiSetEnabled(bool enabled);
 void rtcWifiForget();
 bool rtcWifiStartScan();
@@ -45,6 +46,8 @@ bool rtcWifiScanning();
 int rtcWifiScanCount();
 const char *rtcWifiScanSsid(int index);
 int rtcWifiScanRssi(int index);
+bool rtcWifiScanKnown(int index);
+bool rtcWifiConnectScanResult(int index);
 bool rtcWifiConnectSaved();
 bool rtcWifiConnectCandidate(const char *ssid,const char *password);
 

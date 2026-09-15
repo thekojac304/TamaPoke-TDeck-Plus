@@ -215,7 +215,7 @@ static void renderCompactWifi() {
   compactScreenTitle("SETTINGS"); compactSettingsTabs(1);
   compactButton(Layout::wifiToggle,rtcWifiEnabled()?"WIFI: ON":"WIFI: OFF",rtcWifiEnabled()?UI_BAR_OK:UI_WHITE);
   char network[44];
-  if (rtcWifiConfigured()) snprintf(network,sizeof(network),"KNOWN: %s",rtcWifiSsid());
+  if (rtcWifiConfigured()) snprintf(network,sizeof(network),"KNOWN %d: %s",rtcWifiKnownCount(),rtcWifiSsid());
   else snprintf(network,sizeof(network),"KNOWN: NONE");
   compactButton(Layout::wifiNetwork,network,UI_WHITE);
   compactButton(Layout::wifiScan,rtcWifiScanning()?"SCANNING":"SCAN",UI_WHITE);
@@ -224,7 +224,7 @@ static void renderCompactWifi() {
   compactButton(Layout::wifiSyncTime,"SYNC TIME",UI_BAR_OK);
   const char *feedback=rtcSyncFeedback();
   gfx->setTextColor(feedback?UI_BAR_BAD:Layout::secondaryText);
-  compactCentered(feedback?feedback:"NOT CONNECTED (LOW POWER)",Layout::wifiFeedback,1);
+  compactCentered(feedback?feedback:(rtcWifiEnabled()?"NOT CONNECTED":"RADIO OFF"),Layout::wifiFeedback,1);
   gfx->flush();
 }
 
@@ -236,7 +236,7 @@ static void renderCompactNetworks() {
     int count=rtcWifiScanCount();
     for (int i=0;i<4;++i) {
       char row[44];
-      if (i<count) snprintf(row,sizeof(row),"%s  %d",rtcWifiScanSsid(i),rtcWifiScanRssi(i));
+      if (i<count) snprintf(row,sizeof(row),"%s%s  %d",rtcWifiScanKnown(i)?"* ":"",rtcWifiScanSsid(i),rtcWifiScanRssi(i));
       else snprintf(row,sizeof(row),"-");
       compactButton(Layout::wifiNetworkRow[i],row,i<count?UI_WHITE:UI_TRACK);
     }
@@ -320,6 +320,7 @@ static void compactClockTap(int16_t x,int16_t y) {
   if (clockPage==3) {
     if (rtcWifiScanning()) return;
     for (int i=0;i<4&&i<rtcWifiScanCount();++i) if (Layout::wifiNetworkRow[i].contains(x,y)) {
+      if (rtcWifiConnectScanResult(i)) { clockPage=2; return; }
       snprintf(wifiSelectedSsid,sizeof(wifiSelectedSsid),"%s",rtcWifiScanSsid(i));
       wifiPassword[0]=0; wifiPasswordLen=0; wifiPasswordMode=0; clockPage=4; return;
     }

@@ -6,9 +6,11 @@ persistence still require a T-Deck Plus. No device was flashed during developmen
 
 ## 2026-09-14 physical-test follow-up (provisional)
 
-The fixes in this section build and pass host tests but are **not yet confirmed
-on hardware**. GPS, Wi-Fi, battery percentage, the settings pages, and the new
-dim step must remain provisional until the checklist below is completed.
+The Wi-Fi fixes in this section are **not yet confirmed on hardware**. Physical
+serial testing has confirmed the GPS path at 38400 baud: RMC/GGA arrive
+continuously, checksums and RMC parsing succeed, and parsed UTC advances once
+per second. Battery percentage, the settings pages, and the new dim step remain
+provisional until the checklist below is completed.
 
 - Wi-Fi actions are now requests serviced by `rtcPollAuthoritative()` rather
   than driver/NVS operations executed inside the touch handler. The old
@@ -21,7 +23,9 @@ dim step must remain provisional until the checklist below is completed.
   identifies whether any remaining hardware reset is panic/watchdog/brownout
   and the action in progress. No Wi-Fi path intentionally restarts the ESP.
 - Every Wi-Fi action logs begin/completion, free/minimum heap, largest internal
-  block, driver mode, and link status. Passwords are never logged. Missing
+  block, driver mode, and link status. Station start/stop, association,
+  disconnection, IP acquisition and IP loss are logged with attempt, timeout,
+  local-cleanup and elapsed-time state. Passwords are never logged. Missing
   credentials return `Wi-Fi not configured`; disabled Wi-Fi does not start the
   radio.
 - GNSS is UART1, ESP RX GPIO44, ESP TX GPIO43, 8N1, **38400 baud first**. This
@@ -103,17 +107,30 @@ setup, connect, success or failure.
 
 Settings now has non-overlapping Time, Wi-Fi and System pages. Time owns the live
 local time, authoritative source, timezone preset, `SYNC GPS`, `SYNC WI-FI`, and
-`SET MANUALLY`. Wi-Fi provides on/off, known SSID, low-power disconnected status,
+`SET MANUALLY`. Wi-Fi provides on/off, known SSID, radio-off/disconnected status,
 scan, connect, forget and sync controls. Scan selection opens a masked password
 field driven by the physical keyboard at I2C address `0x55`; printable ASCII,
 backspace/delete, Enter and Escape are supported, while Connect and Cancel remain
 touch controls. Credentials are saved only after successful authentication and
 DHCP, and are retained while Wi-Fi is off.
 
-The connection failure path was a scan-radio teardown/association race: the code
-could call `WiFi.begin()` immediately after asynchronous scan cleanup and station
-disconnect. Association is now staged for 200 ms on the main loop, uses owned,
-NUL-terminated buffers, and logs station states/events without logging secrets.
+The physical failure log did not prove bad credentials. The old loop polled
+`WiFi.status()`, waited 12 seconds without distinguishing association from DHCP,
+declared a timeout, and then called TamaPoke's own radio cleanup. The subsequent
+disconnect reason 36 was therefore an effect of that cleanup, not the cause of
+the failed attempt. In the pinned ESP32 3.3.10 header it is
+`WIFI_REASON_STA_LEAVING` (station leaving). Association now uses an event-driven
+state machine, is staged for 200 ms on the main loop, keeps owned NUL-terminated
+credential buffers alive, and allows 20 seconds from `WiFi.begin()` to reach
+`STA_GOT_IP`. Initial disconnected status is diagnostic only. NTP starts only
+after `STA_GOT_IP`, and radio cleanup occurs only after success, a terminal
+disconnect, timeout, or user cancellation.
+
+Up to four successful networks are retained. Automatic/manual reuse scans and
+selects the strongest visible saved network; selecting a starred known scan row
+reconnects that exact network without password entry. A new credential is
+promoted only after `STA_GOT_IP`; duplicate SSIDs update their slot, and a fifth
+network evicts the oldest slot. Forget removes the currently selected network.
 
 TamaPoke never reads Launcher, Meshtastic, WadaMesh or generic ESP32 station
 credentials. Its new NVS namespace is `tp-wifi`:
@@ -121,8 +138,12 @@ credentials. Its new NVS namespace is `tp-wifi`:
 | Key | Type | Meaning |
 |---|---|---|
 | `on` | bool | User permits Wi-Fi fallback; defaults false |
-| `ssid` | string | TamaPoke-selected station SSID |
-| `pass` | string | Station password; never logged |
+| `count` | uint8 | Number of saved networks, 0..4 |
+| `ssid0`..`ssid3` | string | Successful station SSIDs |
+| `pass0`..`pass3` | string | Corresponding passwords; never logged |
+
+Legacy `ssid`/`pass` keys are migrated into slot zero and removed after a
+successful schema write.
 
 T-Deck-specific state is isolated from the existing pet-save schema:
 
@@ -164,11 +185,13 @@ Successful Wi-Fi setup or NTP sync includes:
 
 ```text
 WIFI candidate ssid="<ssid>" password_length=<n> terminated=1
-WIFI connect staged ssid="<ssid>" password_length=<n> purpose=<setup|auto-ntp|manual-ntp> credentials=tp-wifi
-WIFI begin ssid="<ssid>" password_length=<n> return_status=<status>
+WIFI connect staged ssid="<ssid>" password_length=<n> purpose=<setup|auto-ntp|manual-ntp> credentials=tp-wifi timeout_ms=20000
+WIFI begin ssid="<ssid>" password_length=<n> return_status=<status> asynchronous=1
 WIFI state previous=<status> current=<status>
-WIFI auth=success dhcp=waiting
-WIFI dhcp=acquired ip=<address>
+WIFI event=STA_START mode=<mode> status=<status> active=<0|1> timeout_active=<0|1> local_cleanup=<0|1> elapsed_ms=<n>
+WIFI event=STA_CONNECTED mode=<mode> status=<status> active=1 timeout_active=1 local_cleanup=0 elapsed_ms=<n>
+WIFI event=STA_GOT_IP mode=<mode> status=<status> active=1 timeout_active=1 local_cleanup=0 elapsed_ms=<n>
+WIFI auth=success dhcp=acquired ip=<address>
 CLOCK source=WIFI NTP requested
 CLOCK source=WIFI acquired_utc=<epoch>
 CLOCK references saved_utc=<epoch-or-0> saved_wall=<epoch-or-0> offset=<seconds>
@@ -185,9 +208,10 @@ CLOCK automatic sync failed gps=<no-time|no-data> wifi=<disabled|not-configured>
 or, after a configured network attempt:
 
 ```text
-WIFI disconnected reason=<code> auth=<failed|not-established>
-WIFI connect timeout status=<status> disconnect_reason=<code>
-CLOCK Wi-Fi/NTP failed reason=<WIFI AUTH FAILED|WIFI CONNECT FAILED|NTP FAILED>
+WIFI event=STA_DISCONNECTED reason=<symbol> mode=<mode> status=<status> active=1 timeout_active=1 local_cleanup=0 elapsed_ms=<n>
+WIFI disconnect_reason=<code> name=<symbol>
+WIFI connect terminal phase=<phase> status=<status> disconnect_reason=<code> elapsed_ms=<n>
+CLOCK Wi-Fi/NTP failed reason=<WIFI AUTH FAILED|WIFI AP NOT FOUND|WIFI CONNECT FAILED|NTP FAILED>
 CLOCK automatic sync failed gps=<no-time|no-data> wifi=<reason>
 ```
 
@@ -204,7 +228,9 @@ Physical validation for this pass:
 4. Enable Wi-Fi, scan, select a network, enter letters/numbers/symbols with the
    physical keyboard, test backspace, Escape, Enter, and touch Connect/Cancel.
    Confirm masked display, `TIME: WIFI`, no password in serial output, saved
-   `KNOWN` status, automatic reuse after reboot/manual sync, and radio shutdown.
+   `KNOWN` count, and radio shutdown. Save a second network, then confirm the
+   strongest visible saved network is reused after reboot/manual sync and a
+   starred scan row reconnects the selected network without password entry.
 5. Enter a deliberately wrong password and confirm an authentication reason is
    logged, no secret appears, the device stays running, and retry succeeds.
 6. Reboot after a measured powered-off interval and confirm exactly one nonzero

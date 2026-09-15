@@ -39,6 +39,7 @@ uint32_t rtcSetTimezoneIndex(uint8_t) { return rtcEpoch(); }
 bool rtcWifiEnabled() { return false; }
 bool rtcWifiConfigured() { return false; }
 const char *rtcWifiSsid() { return ""; }
+int rtcWifiKnownCount() { return 0; }
 void rtcWifiSetEnabled(bool) {}
 void rtcWifiForget() {}
 bool rtcWifiStartScan() { return false; }
@@ -46,6 +47,8 @@ bool rtcWifiScanning() { return false; }
 int rtcWifiScanCount() { return 0; }
 const char *rtcWifiScanSsid(int) { return ""; }
 int rtcWifiScanRssi(int) { return 0; }
+bool rtcWifiScanKnown(int) { return false; }
+bool rtcWifiConnectScanResult(int) { return false; }
 bool rtcWifiConnectSaved() { return false; }
 bool rtcWifiConnectCandidate(const char *,const char *) { return false; }
 

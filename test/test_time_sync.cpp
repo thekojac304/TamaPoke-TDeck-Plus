@@ -1,6 +1,7 @@
 #include "framework.h"
 #include "../src/board/tdeck_plus/time_sync_policy.h"
 #include "../src/board/tdeck_plus/timezone_policy.h"
+#include "../src/board/tdeck_plus/wifi_connection_policy.h"
 #include "../src/ui/time_ui.h"
 
 TEST(time_sync, gps_success_wins_and_source_is_visible) {
@@ -97,4 +98,52 @@ TEST(time_sync, timezone_change_cannot_duplicate_authoritative_catchup) {
   CHECK(p.consumeCatchup());
   (void)TpTimezone::offsetSeconds(TpTimezone::US_EASTERN,2026,TpTimezone::epoch(2026,7,15,16));
   CHECK(!p.consumeCatchup());
+}
+
+TEST(wifi_connection, disconnected_return_after_begin_remains_connecting) {
+  TpWifi::ConnectionPolicy p; p.begin(100); p.poll(101);
+  CHECK(p.active()); CHECK(!p.failed()); CHECK(!p.cleanupAllowed());
+}
+
+TEST(wifi_connection, got_ip_is_success_and_allows_cleanup) {
+  TpWifi::ConnectionPolicy p; p.begin(100); p.connected();
+  CHECK_EQ(p.phase,TpWifi::ASSOCIATED); p.gotIp();
+  CHECK(p.success()); CHECK(p.cleanupAllowed()); CHECK(p.credentialsProven());
+}
+
+TEST(wifi_connection, terminal_disconnect_and_timeout_are_failures) {
+  TpWifi::ConnectionPolicy terminal; terminal.begin(100); terminal.disconnected(202,true,false);
+  CHECK(terminal.failed()); CHECK_EQ(terminal.reason,202); CHECK(!terminal.credentialsProven());
+  TpWifi::ConnectionPolicy timeout; timeout.begin(100); timeout.poll(100+TpWifi::CONNECT_TIMEOUT_MS-1);
+  CHECK(timeout.active()); timeout.poll(100+TpWifi::CONNECT_TIMEOUT_MS);
+  CHECK_EQ(timeout.phase,TpWifi::TIMED_OUT); CHECK(timeout.cleanupAllowed());
+}
+
+TEST(wifi_connection, local_disconnect_is_cancel_not_remote_failure) {
+  TpWifi::ConnectionPolicy p; p.begin(100); p.disconnected(36,false,true);
+  CHECK_EQ(p.phase,TpWifi::CANCELED); CHECK(p.cleanupAllowed());
+}
+
+TEST(wifi_connection, credential_input_never_appends_enter_or_newline) {
+  char password[8]={0}; size_t len=0;
+  CHECK(TpWifi::appendCredentialKey(password,sizeof(password),'a',len));
+  CHECK(!TpWifi::appendCredentialKey(password,sizeof(password),'\r',len));
+  CHECK(!TpWifi::appendCredentialKey(password,sizeof(password),'\n',len));
+  CHECK_EQ(std::string(password),std::string("a")); CHECK_EQ(len,1u);
+  CHECK(TpWifi::appendCredentialKey(password,sizeof(password),8,len)); CHECK_EQ(len,0u);
+}
+
+TEST(wifi_connection, retains_four_updates_duplicates_and_evicts_oldest) {
+  char ssids[TpWifi::MAX_SAVED_NETWORKS][TpWifi::SSID_CAPACITY]={{0}};
+  char passwords[TpWifi::MAX_SAVED_NETWORKS][TpWifi::PASSWORD_CAPACITY]={{0}}; uint8_t count=0,current=0;
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"one","1"),0);
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"two","2"),1);
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"three","3"),2);
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"four","4"),3); CHECK_EQ(count,4);
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"two","new"),1);
+  CHECK_EQ(count,4); CHECK_EQ(std::string(passwords[1]),std::string("new"));
+  CHECK_EQ(TpWifi::upsertCredential(ssids,passwords,count,"five","5"),3);
+  CHECK_EQ(std::string(ssids[0]),std::string("two")); CHECK_EQ(std::string(ssids[3]),std::string("five"));
+  current=1; CHECK(TpWifi::removeCredential(ssids,passwords,count,current));
+  CHECK_EQ(count,3); CHECK_EQ(std::string(ssids[1]),std::string("four"));
 }
